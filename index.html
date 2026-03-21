@@ -8,6 +8,10 @@
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script>
+  window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };
+</script>
+<script defer src="/_vercel/insights/script.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
 html,body{color-scheme:light!important;background:#fff9f0!important;color:#2d2d2d!important;}
@@ -840,7 +844,7 @@ function Dialogue({chapter}){
   );
 }
 
-// ─── Kuulamine ────────────────────────────────────────────────────────────────
+// ─── Kuulamine ─────────────────────────────────────────────────────────���──────
 function Listening({chapter}){
   const [playingDlg,setPlayingDlg]=useState(null);
   const [hlLine,setHlLine]=useState(null);
