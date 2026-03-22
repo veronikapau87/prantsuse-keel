@@ -1,0 +1,1736 @@
+<!DOCTYPE html>
+<html lang="et">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Prantsuse keel 🇫🇷</title>
+<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@400;600;700;800&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet"/>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+html,body{color-scheme:light!important;background:#fff9f0!important;color:#2d2d2d!important;}
+body{font-family:'Nunito',sans-serif;min-height:100vh;}
+#root{background:#fff9f0!important;min-height:100vh;}
+.btn{border:none;border-radius:12px;font-family:'Nunito',sans-serif;font-weight:700;cursor:pointer;transition:all .15s;display:inline-flex;align-items:center;gap:6px;}
+.btn:active{transform:scale(.96);}
+.btn-sm{padding:6px 14px;font-size:12px;}
+.tab{padding:8px 16px;border-radius:20px;border:none;cursor:pointer;font-family:'Nunito',sans-serif;font-weight:700;font-size:13px;transition:all .2s;white-space:nowrap;}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:translateY(0);}}
+@keyframes pop{0%{transform:scale(.85);opacity:0;}100%{transform:scale(1);opacity:1;}}
+@keyframes shake{0%,100%{transform:translateX(0)}20%{transform:translateX(-8px)}40%{transform:translateX(8px)}60%{transform:translateX(-5px)}80%{transform:translateX(5px)}}
+@keyframes correct{0%{transform:scale(1)}40%{transform:scale(1.18)}100%{transform:scale(1)}}
+@keyframes confetti{0%{transform:translateY(0) rotate(0);opacity:1}100%{transform:translateY(-80px) rotate(720deg);opacity:0}}
+@keyframes star{0%{transform:scale(0) rotate(-30deg);opacity:0}60%{transform:scale(1.3) rotate(10deg);opacity:1}100%{transform:scale(1) rotate(0);opacity:1}}
+@keyframes xpPop{0%{transform:translateY(0);opacity:1}100%{transform:translateY(-40px);opacity:0}}
+.fadein{animation:fadeIn .3s ease;}
+.shake{animation:shake .4s ease;}
+.correct{animation:correct .3s ease;}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState,useRef,useEffect}=React;
+
+function speak(text,rate){
+  window.speechSynthesis.cancel();
+  const u=new SpeechSynthesisUtterance(text);
+  u.lang="fr-FR";u.rate=rate||globalSpeed;
+  const fr=window.speechSynthesis.getVoices().find(v=>v.lang.startsWith("fr"));
+  if(fr)u.voice=fr;
+  window.speechSynthesis.speak(u);
+}
+window.speechSynthesis.onvoiceschanged=()=>window.speechSynthesis.getVoices();
+
+// ─── Heli feedback ────────────────────────────────────────────────────────────
+function playSound(type) {
+  try {
+    const ctx = new (window.AudioContext||window.webkitAudioContext)();
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    if(type==="correct") {
+      o.frequency.setValueAtTime(520,ctx.currentTime);
+      o.frequency.setValueAtTime(660,ctx.currentTime+0.1);
+      o.frequency.setValueAtTime(800,ctx.currentTime+0.2);
+      g.gain.setValueAtTime(0.3,ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+0.4);
+      o.start(); o.stop(ctx.currentTime+0.4);
+    } else if(type==="wrong") {
+      o.frequency.setValueAtTime(200,ctx.currentTime);
+      o.frequency.setValueAtTime(150,ctx.currentTime+0.1);
+      g.gain.setValueAtTime(0.2,ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+0.3);
+      o.start(); o.stop(ctx.currentTime+0.3);
+    } else if(type==="levelup") {
+      [400,500,600,800].forEach((f,i)=>{
+        const o2=ctx.createOscillator(); const g2=ctx.createGain();
+        o2.connect(g2); g2.connect(ctx.destination);
+        o2.frequency.value=f;
+        g2.gain.setValueAtTime(0.25,ctx.currentTime+i*0.1);
+        g2.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+i*0.1+0.15);
+        o2.start(ctx.currentTime+i*0.1); o2.stop(ctx.currentTime+i*0.1+0.15);
+      });
+    }
+  } catch(e){}
+}
+
+// ─── XP & Tasemed ─────────────────────────────────────────────────────────────
+const LEVELS = [
+  {min:0,   name:"Algaja",      emoji:"🐣", color:"#94a3b8"},
+  {min:20,  name:"Õppur",       emoji:"📚", color:"#3b82f6"},
+  {min:60,  name:"Prantsuse sõber", emoji:"🥐", color:"#f59e0b"},
+  {min:120, name:"Pariislane",  emoji:"🗼", color:"#8b5cf6"},
+  {min:200, name:"Meister",     emoji:"⭐", color:"#ef4444"},
+];
+function getLevel(xp) {
+  let lv = LEVELS[0];
+  for(const l of LEVELS) { if(xp>=l.min) lv=l; }
+  return lv;
+}
+function getNextLevel(xp) {
+  for(const l of LEVELS) { if(xp<l.min) return l; }
+  return null;
+}
+
+// ─── XP popup ─────────────────────────────────────────────────────────────────
+function XpPopup({xp, color}) {
+  return (
+    <div style={{position:"fixed",top:"40%",left:"50%",transform:"translateX(-50%)",
+      background:color,color:"#fff",borderRadius:20,padding:"8px 20px",
+      fontSize:20,fontWeight:900,zIndex:9999,pointerEvents:"none",
+      animation:"xpPop 1s ease forwards"}}>
+      +{xp} XP ✨
+    </div>
+  );
+}
+
+// ─── Konfetti ─────────────────────────────────────────────────────────────────
+function Confetti() {
+  const pieces = ["⭐","🌟","✨","🎉","🎊","💫","🏆"];
+  return (
+    <div style={{position:"fixed",top:0,left:0,width:"100%",height:"100%",pointerEvents:"none",zIndex:9998,overflow:"hidden"}}>
+      {Array.from({length:12}).map((_,i)=>(
+        <div key={i} style={{
+          position:"absolute",
+          left:`${10+i*7}%`,
+          top:"30%",
+          fontSize:`${16+Math.random()*16}px`,
+          animation:`confetti ${0.6+Math.random()*0.8}s ease forwards`,
+          animationDelay:`${i*0.06}s`
+        }}>{pieces[i%pieces.length]}</div>
+      ))}
+    </div>
+  );
+}
+
+// ─── Progress bar komponent ────────────────────────────────────────────────────
+function LevelBar({xp, color}) {
+  const lv = getLevel(xp);
+  const next = getNextLevel(xp);
+  const pct = next ? Math.round(((xp-lv.min)/(next.min-lv.min))*100) : 100;
+  return (
+    <div style={{display:"flex",alignItems:"center",gap:8,padding:"6px 14px",background:"#fff",borderBottom:"1px solid #f3f4f6"}}>
+      <span style={{fontSize:18}}>{lv.emoji}</span>
+      <div style={{flex:1}}>
+        <div style={{display:"flex",justifyContent:"space-between",fontSize:11,fontWeight:700,marginBottom:3}}>
+          <span style={{color:lv.color}}>{lv.name}</span>
+          <span style={{color:"#9ca3af"}}>{xp} XP {next?`→ ${next.min}`:""}</span>
+        </div>
+        <div style={{height:6,background:"#e5e7eb",borderRadius:3,overflow:"hidden"}}>
+          <div style={{height:"100%",width:`${pct}%`,background:`linear-gradient(90deg,${lv.color},${color})`,borderRadius:3,transition:"width .5s"}}/>
+        </div>
+      </div>
+      {next&&<span style={{fontSize:11,color:"#9ca3af"}}>{next.emoji}</span>}
+    </div>
+  );
+}
+
+
+const CHAPTERS=[
+  {id:41,pic:"🧒👧 — 👃👂👁️",title:"Leçon 41",subtitle:"Kehaosad ja enesetutvustus",emoji:"👤",color:"#3b82f6",
+    vocabulary:[
+      {fr:"le nez",et:"nina",ex:"Mon nez est droit."},
+      {fr:"la bouche",et:"suu",ex:"Ma bouche est grande."},
+      {fr:"les cheveux",et:"juuksed",ex:"Mes cheveux sont noirs."},
+      {fr:"les yeux",et:"silmad",ex:"Mes yeux sont bruns."},
+      {fr:"les joues",et:"põsed",ex:"Mes joues sont roses."},
+      {fr:"les oreilles",et:"kõrvad",ex:"Mes oreilles sont grandes."},
+      {fr:"la peau",et:"nahk",ex:"Ma peau est blanche."},
+      {fr:"je suis",et:"ma olen",ex:"Je suis un garçon."},
+      {fr:"j'habite à",et:"ma elan",ex:"J'habite à Tallinn."},
+      {fr:"bon / bonne",et:"hea",ex:"Je suis une bonne élève."},
+      {fr:"beau / belle",et:"ilus",ex:"Je suis un beau garçon."},
+      {fr:"noir(e)",et:"must",ex:"Mes cheveux sont noirs."},
+      {fr:"blond(e)",et:"heledapäine",ex:"Ses cheveux sont blonds."},
+      {fr:"roux / rousse",et:"punapäine",ex:"Mes cheveux sont roux."},
+      {fr:"bleu(e)",et:"sinine",ex:"Mes yeux sont bleus."},
+      {fr:"brun(e)",et:"pruun",ex:"Mes yeux sont bruns."},
+      {fr:"droit(e)",et:"sirge",ex:"Mon nez est droit."},
+      {fr:"mon / ma / mes",et:"minu",ex:"Mon nez, ma bouche, mes cheveux."},
+      {fr:"ton / ta / tes",et:"sinu",ex:"Ton nez, ta bouche, tes cheveux."},
+    ],
+    dialogues:[
+      {id:1,title:"René tutvustab end",lines:[
+        {speaker:"René",fr:"Je m'appelle René. Je suis un garçon.",et:"Minu nimi on René. Ma olen poiss."},
+        {speaker:"René",fr:"J'ai huit ans. Je suis Estonien et j'habite à Tallinn.",et:"Mul on kaheksa aastat. Ma olen eestlane ja elan Tallinnas."},
+        {speaker:"René",fr:"Je vais à l'école. Je suis un élève de la deuxième classe.",et:"Ma käin koolis. Ma olen teise klassi õpilane."},
+        {speaker:"René",fr:"Mes cheveux sont noirs, mais ma peau est blanche.",et:"Minu juuksed on mustad, aga nahk on valge."},
+        {speaker:"René",fr:"Je suis un beau garçon, je crois.",et:"Ma olen ilus poiss, ma arvan."},
+      ]},
+      {id:2,title:"Marie tutvustab end",lines:[
+        {speaker:"Marie",fr:"Moi, je m'appelle Marie. Je suis une fille.",et:"Mina, minu nimi on Marie. Ma olen tüdruk."},
+        {speaker:"Marie",fr:"Notre école, c'est le Lycée Français de Tallinn.",et:"Meie kool on Tallinna Prantsuse Lütseum."},
+        {speaker:"Marie",fr:"Mes cheveux sont roux et ma peau est blanche.",et:"Minu juuksed on punased ja nahk on valge."},
+        {speaker:"Marie",fr:"Mes yeux sont bleus, mes joues sont roses et ma bouche est rouge.",et:"Silmad sinised, põsed roosad ja suu punane."},
+        {speaker:"Marie",fr:"Je suis une belle fille, je crois.",et:"Ma olen ilus tüdruk, ma arvan."},
+      ]},
+    ],
+  },
+  {id:42,pic:"👦🏿👱‍♀️ — 🏫📚",title:"Leçon 42",subtitle:"Serge ja Brigitte",emoji:"👫",color:"#ec4899",
+    vocabulary:[
+      {fr:"le cou",et:"kael",ex:"Son cou est noir."},
+      {fr:"la tête",et:"pea",ex:"Sa tête est noire."},
+      {fr:"les mains",et:"käed",ex:"Ses mains sont noires."},
+      {fr:"les bras",et:"käsivarred",ex:"Ses bras sont noirs."},
+      {fr:"le dos",et:"selg",ex:"Son dos est noir."},
+      {fr:"les jambes",et:"jalad",ex:"Ses jambes sont noires."},
+      {fr:"les pieds",et:"labajalad",ex:"Ses pieds sont noirs."},
+      {fr:"frisé(e)",et:"lokkis",ex:"Ses cheveux sont frisés."},
+      {fr:"gentil(le)",et:"armas",ex:"Il est gentil aussi."},
+      {fr:"habiter",et:"elama",ex:"Il habite à Paris."},
+      {fr:"Comment vas-tu?",et:"Kuidas sul läheb?",ex:"Comment vas-tu? Je vais bien."},
+      {fr:"Ça va comme ci comme ça",et:"Läheb nii ja naa",ex:"Ça va comme ci comme ça."},
+      {fr:"Pas mal",et:"Pole viga",ex:"Pas mal, merci."},
+    ],
+    dialogues:[
+      {id:3,title:"Vas-tu à l'école?",lines:[
+        {speaker:"A",fr:"Vas-tu à l'école?",et:"Kas sa käid koolis?"},
+        {speaker:"B",fr:"Oui, je vais à l'école.",et:"Jah, ma käin koolis."},
+        {speaker:"A",fr:"À quelle école vas-tu?",et:"Millises koolis sa käid?"},
+        {speaker:"B",fr:"Je vais au Lycée Français. Et toi?",et:"Ma käin Prantsuse Lütseumis. Ja sina?"},
+        {speaker:"A",fr:"Moi, je vais au Gymnase Gustave-Adolphe.",et:"Mina käin Gustav Adolfi Gümnaasiumis."},
+        {speaker:"B",fr:"Aimes-tu ton école?",et:"Kas sa armastad oma kooli?"},
+        {speaker:"A",fr:"Oui, bien sûr. Et toi?",et:"Jah, muidugi. Ja sina?"},
+        {speaker:"B",fr:"Moi aussi.",et:"Mina samuti."},
+      ]},
+      {id:4,title:"Kuidas läheb?",lines:[
+        {speaker:"A",fr:"Comment vas-tu?",et:"Kuidas sul läheb?"},
+        {speaker:"B",fr:"Je vais bien, merci. Et toi?",et:"Mul läheb hästi, tänan. Ja sinul?"},
+        {speaker:"A",fr:"Ça va comme ci comme ça.",et:"Läheb nii ja naa."},
+        {speaker:"C",fr:"Comment allez-vous, madame?",et:"Kuidas teil läheb, proua?"},
+        {speaker:"D",fr:"Je vais bien, merci. Et vous, monsieur?",et:"Mul läheb hästi. Ja teil, härra?"},
+        {speaker:"C",fr:"Pas mal, merci.",et:"Pole viga, tänan."},
+      ]},
+    ],songs:[{"title": "Allons chercher des moules!", "type": "laul", "emoji": "🐔", "lines": [{"fr": "– Allons chercher des moules!", "et": "– Läki otsima rannakarpe!"}, {"fr": "– Je ne suis pas une poule.", "et": "– Ma pole kana."}, {"fr": "– Allons donc dans le bois!", "et": "– Läki siis metsa!"}, {"fr": "– Je ne suis pas une oie.", "et": "– Ma pole hani."}, {"fr": "– Allons à la Bastille!", "et": "– Läki Bastille"i!"}, {"fr": "– Je ne suis pas une fille. Tu vois, il fait beau temps. Je veux aller aux champs.", "et": "– Ma pole tüdruk. Sa näed, on ilus ilm. Ma tahan põldudele minna."}]}],
+  },
+  {id:43,pic:"📱💬 — 📺📖",title:"Leçon 43",subtitle:"Mida sa teed?",emoji:"📺",color:"#7c3aed",
+    vocabulary:[
+      {fr:"dormir",et:"magama",ex:"Je dors. Tu dors."},
+      {fr:"je dors",et:"ma magan",ex:"Non, je ne dors pas."},
+      {fr:"lire",et:"lugema",ex:"Je lis un livre."},
+      {fr:"que lis-tu?",et:"mida sa loed?",ex:"Que lis-tu? Je lis..."},
+      {fr:"qu'est-ce que tu fais?",et:"mida sa teed?",ex:"Qu'est-ce que tu fais?"},
+      {fr:"regarder la télé",et:"televiisorit vaatama",ex:"Je regarde la télé."},
+      {fr:"un livre",et:"raamat",ex:"C'est un bon livre."},
+      {fr:"aimer",et:"armastama",ex:"Tu aimes ça?"},
+      {fr:"préférer",et:"eelistama",ex:"Je préfère le Chat Botté."},
+      {fr:"mauvais goût",et:"halb maitse",ex:"Tu as mauvais goût."},
+      {fr:"le moulin",et:"veski",ex:"Ton moulin va trop vite."},
+    ],
+    dialogues:[
+      {id:5,title:"Allô René — Kas sa magad?",lines:[
+        {speaker:"A",fr:"Allô! C'est toi, René?",et:"Hallo! Oled see sina, René?"},
+        {speaker:"René",fr:"Oui, c'est moi.",et:"Jah, see olen mina."},
+        {speaker:"A",fr:"Tu dors?",et:"Kas sa magad?"},
+        {speaker:"René",fr:"Non, je ne dors pas. Je lis.",et:"Ei, ma ei maga. Ma loen."},
+        {speaker:"A",fr:"Que lis-tu?",et:"Mida sa loed?"},
+        {speaker:"René",fr:"Je lis les lettres de mon moulin.",et:"Ma loen kirju minu veskilt."},
+        {speaker:"A",fr:"Tu aimes ça?",et:"Meeldib see sulle?"},
+        {speaker:"René",fr:"Oui, c'est un bon livre.",et:"Jah, see on hea raamat."},
+      ]},
+      {id:6,title:"Allô Marie — Televiisor",lines:[
+        {speaker:"A",fr:"Allô! Marie! Tu dors?",et:"Hallo! Marie! Kas sa magad?"},
+        {speaker:"Marie",fr:"Non, je ne dors pas.",et:"Ei, ma ei maga."},
+        {speaker:"A",fr:"Qu'est-ce que tu fais?",et:"Mida sa teed?"},
+        {speaker:"Marie",fr:"Je regarde la télé.",et:"Ma vaatan televiisorit."},
+        {speaker:"A",fr:"Qu'est-ce qu'il y a à la télé?",et:"Mis televiisoris on?"},
+        {speaker:"Marie",fr:"Un film sur Louis Quatorze.",et:"Üks film Louis Neljateistkümnenast."},
+        {speaker:"A",fr:"Tu as mauvais goût. Je regarde un film sur Jeanne d'Arc.",et:"Sul on halb maitse. Mina vaatan filmi Jeanne d'Arc'ist."},
+      ]},
+    ],songs:[{"title": "Meunier, tu dors! (1. salm)", "type": "laul", "emoji": "🎵", "lines": [{"fr": "Meunier, tu dors!", "et": "Mölder, sa magad!"}, {"fr": "Ton moulin, ton moulin va trop vite.", "et": "Sinu veski, sinu veski käib liiga kiiresti."}, {"fr": "Meunier, tu dors!", "et": "Mölder, sa magad!"}, {"fr": "Ton moulin, ton moulin va trop fort.", "et": "Sinu veski, sinu veski käib liiga tugevalt."}, {"fr": "Ton moulin, ton moulin va trop vite,", "et": "Sinu veski, sinu veski käib liiga kiiresti,"}, {"fr": "ton moulin, ton moulin va trop fort.", "et": "sinu veski, sinu veski käib liiga tugevalt."}]}],
+  },
+  {id:44,pic:"☀️🌧️ — 🌬️❄️",title:"Leçon 44",subtitle:"Milline ilm on?",emoji:"☀️",color:"#d97706",
+    vocabulary:[
+      {fr:"Quel temps fait-il?",et:"Milline ilm on?",ex:"Quel temps fait-il aujourd'hui?"},
+      {fr:"il fait beau temps",et:"on ilus ilm",ex:"Aujourd'hui il fait beau temps."},
+      {fr:"il fait mauvais temps",et:"on halb ilm",ex:"Il fait mauvais temps."},
+      {fr:"le soleil",et:"päike",ex:"Le soleil brille."},
+      {fr:"le vent",et:"tuul",ex:"Le vent souffle."},
+      {fr:"aujourd'hui",et:"täna",ex:"Aujourd'hui il fait beau."},
+      {fr:"un conte",et:"muinasjutt",ex:"C'est un joli conte."},
+      {fr:"le Petit Chaperon Rouge",et:"Punamütsike",ex:"Je lis le Petit Chaperon Rouge."},
+      {fr:"trop vite",et:"liiga kiiresti",ex:"Ton moulin va trop vite."},
+    ],
+    dialogues:[
+      {id:7,title:"Milline ilm täna on?",lines:[
+        {speaker:"A",fr:"Quel temps fait-il aujourd'hui?",et:"Milline ilm täna on?"},
+        {speaker:"B",fr:"Aujourd'hui il fait beau temps. Le soleil brille.",et:"Täna on ilus ilm. Päike särab."},
+        {speaker:"A",fr:"Quel temps fait-il aujourd'hui?",et:"Milline ilm täna on?"},
+        {speaker:"B",fr:"Aujourd'hui il fait mauvais temps. Le vent souffle.",et:"Täna on halb ilm. Puhub tuul."},
+      ]},
+      {id:8,title:"Allô Henri — Muinasjutud",lines:[
+        {speaker:"A",fr:"Allô! Tu dors, Henri?",et:"Hallo! Kas sa magad, Henri?"},
+        {speaker:"Henri",fr:"Non, je ne dors pas. Je lis.",et:"Ei, ma ei maga. Ma loen."},
+        {speaker:"A",fr:"Qu'est-ce que tu lis?",et:"Mida sa loed?"},
+        {speaker:"Henri",fr:"Le Petit Chaperon Rouge.",et:"Punamütsikest."},
+        {speaker:"A",fr:"Tu as mauvais goût. Moi, je préfère le Chat Botté.",et:"Sul on halb maitse. Mina eelistan Saabastega kassi."},
+      ]},
+    ],songs:[{"title": "Meunier, tu dors! (2. ja 3. salm)", "type": "laul", "emoji": "🎵", "lines": [{"fr": "Meunier, viens-tu?", "et": "Mölder, kas sa tuled?"}, {"fr": "Le travail, le travail se décide.", "et": "Töö, töö on otsustavas järgus."}, {"fr": "Meunier, viens-tu?", "et": "Mölder, kas sa tuled?"}, {"fr": "Le travail, le travail est perdu.", "et": "Töö, töö läheb kaotsi."}, {"fr": "Meunier, tu dors!", "et": "Mölder, sa magad!"}, {"fr": "Et le vent et le vent souffle, souffle.", "et": "Ja tuul ja tuul aina puhub."}, {"fr": "Meunier, tu dors!", "et": "Mölder, sa magad!"}, {"fr": "Et le vent et le vent souffle fort.", "et": "Ja tuul ja tuul puhub tugevalt."}]}],
+  },
+  {id:45,pic:"🐔🌾 — 🎡",title:"Leçon 45",subtitle:"Kuhu lähed?",emoji:"🚶",color:"#0d9488",
+    vocabulary:[
+      {fr:"rien",et:"mitte midagi",ex:"Rien. Je lis."},
+      {fr:"vouloir",et:"tahtma",ex:"Veux-tu aller aux champs?"},
+      {fr:"les oiseaux chantent",et:"linnud laulavad",ex:"Les oiseaux chantent."},
+      {fr:"d'accord",et:"nõus / olgu",ex:"D'accord. On va où?"},
+      {fr:"la maison",et:"maja / kodu",ex:"Je vais à la maison."},
+      {fr:"le cinéma",et:"kino",ex:"Je vais au cinéma."},
+      {fr:"le théâtre",et:"teater",ex:"Je vais au théâtre."},
+      {fr:"j'écoute la radio",et:"ma kuulan raadiot",ex:"J'écoute la radio."},
+      {fr:"je joue à la balle",et:"ma mängin palli",ex:"Je joue à la balle."},
+    ],
+    dialogues:[
+      {id:9,title:"Allô Jean — Läki Champs-Élysées'le!",lines:[
+        {speaker:"Pierre",fr:"Allô! C'est toi, Jean?",et:"Hallo! Oled see sina, Jean?"},
+        {speaker:"Jean",fr:"Oui, c'est moi. Salut, Pierre!",et:"Jah, see olen mina. Tere, Pierre!"},
+        {speaker:"Pierre",fr:"Qu'est-ce que tu fais?",et:"Mida sa teed?"},
+        {speaker:"Jean",fr:"Rien.",et:"Ei midagi."},
+        {speaker:"Pierre",fr:"Veux-tu aller aux champs? Il fait beau temps aujourd'hui, le soleil brille, les oiseaux chantent.",et:"Tahad sa põldudele minna? Täna on ilus ilm, päike särab, linnud laulavad."},
+        {speaker:"Jean",fr:"Non, je ne veux pas.",et:"Ei, ma ei taha."},
+        {speaker:"Pierre",fr:"Mais qu'est-ce que tu fais?",et:"Aga mida sa siis teed?"},
+        {speaker:"Jean",fr:"Rien. Je lis.",et:"Ei midagi. Ma loen."},
+        {speaker:"Pierre",fr:"Qu'est-ce que tu lis?",et:"Mida sa loed?"},
+        {speaker:"Jean",fr:"Les contes de Charles Perrault \"Le Petit Chaperon Rouge\" et \"Le Chat Botté\".",et:"Charles Perrault' muinasjutte \"Punamütsike\" ja \"Saabastega kass\"."},
+        {speaker:"Pierre",fr:"Tu as mauvais goût. Moi, je préfère \"Les lettres de mon moulin\". Alors, tu viens ou tu ne viens pas?",et:"Sul on halb maitse. Mina eelistan \"Kirju mu veskilt\". No nii, kas sa tuled või ei tule?"},
+        {speaker:"Jean",fr:"D'accord. On va où?",et:"Nõus. Kuhu siis läheme?"},
+        {speaker:"Pierre",fr:"Aux champs.",et:"Põldudele."},
+        {speaker:"Jean",fr:"Aux Champs-Élysées?",et:"Elüüsiumi väljadele?"},
+        {speaker:"Pierre",fr:"Bien sûr!",et:"Muidugi!"},
+      ]},
+    ],songs:[{"title": "Quand trois poules vont aux champs", "type": "laul", "emoji": "🐔", "lines": [{"fr": "Quand trois poules vont aux champs", "et": "Kui kolm kana lähevad põllule"}, {"fr": "la première marche devant.", "et": "esimene kõnnib ees."}, {"fr": "La deuxième suit la première,", "et": "Teine järgneb esimesele,"}, {"fr": "la troisième marche derrière.", "et": "kolmas kõnnib taga."}, {"fr": "Quand trois poules...", "et": "Kui kolm kana..."}]}],
+  },
+  {id:46,pic:"🌸☀️🍂❄️",title:"Leçon 46",subtitle:"Aastaajad ja ilm",emoji:"🌦️",color:"#2563eb",
+    vocabulary:[
+      {fr:"il pleut",et:"sajab vihma",ex:"En automne il pleut."},
+      {fr:"il neige",et:"sajab lund",ex:"En hiver il neige."},
+      {fr:"il gèle",et:"külmetab",ex:"En hiver il gèle."},
+      {fr:"il fait chaud",et:"on soe",ex:"En été il fait chaud."},
+      {fr:"il fait froid",et:"on külm",ex:"En hiver il fait froid."},
+      {fr:"le printemps",et:"kevad",ex:"Au printemps il fait beau."},
+      {fr:"l'été",et:"suvi",ex:"En été il fait chaud."},
+      {fr:"l'automne",et:"sügis",ex:"En automne il pleut."},
+      {fr:"l'hiver",et:"talv",ex:"En hiver il neige."},
+      {fr:"au printemps",et:"kevadel",ex:"Au printemps les oiseaux chantent."},
+      {fr:"en été",et:"suvel",ex:"En été il fait chaud."},
+      {fr:"en automne",et:"sügisel",ex:"En automne il pleut."},
+      {fr:"en hiver",et:"talvel",ex:"En hiver il neige."},
+    ],
+    dialogues:[
+      {id:10,title:"Neli aastaaega",lines:[
+        {speaker:"A",fr:"Combien de saisons y a-t-il dans une année?",et:"Mitu aastaaega on aastas?"},
+        {speaker:"B",fr:"Dans une année il y a quatre saisons.",et:"Aastas on neli aastaaega."},
+        {speaker:"B",fr:"Au printemps il fait beau. Les oiseaux chantent.",et:"Kevadel on ilus ilm. Linnud laulavad."},
+        {speaker:"B",fr:"En été il fait chaud.",et:"Suvel on soe."},
+        {speaker:"B",fr:"En automne il pleut et il fait du vent.",et:"Sügisel sajab vihma ja puhub tuul."},
+        {speaker:"B",fr:"En hiver il fait froid. Il neige et il gèle.",et:"Talvel on külm. Sajab lund ja külmetab."},
+      ]},
+    ],
+  },
+  {id:47,pic:"💐🌷🌼🌸",title:"Leçon 47",subtitle:"Kevadlilled",emoji:"🌸",color:"#db2777",
+    vocabulary:[
+      {fr:"il y a",et:"on olemas",ex:"Il y a des fleurs."},
+      {fr:"une fleur",et:"lill",ex:"Il y a des fleurs au printemps."},
+      {fr:"la perce-neige",et:"lumikelluke",ex:"Il y a des perce-neiges."},
+      {fr:"la tulipe",et:"tulp",ex:"Je n'aime pas les tulipes."},
+      {fr:"le narcisse",et:"nartsiss",ex:"Il y a des narcisses."},
+      {fr:"la violette",et:"kannike",ex:"J'aime bien les violettes."},
+      {fr:"le muguet",et:"maikelluke",ex:"Le muguet est joli."},
+      {fr:"j'aime bien",et:"mulle meeldib",ex:"J'aime bien les violettes."},
+      {fr:"je n'aime pas",et:"mulle ei meeldi",ex:"Je n'aime pas les tulipes."},
+    ],
+    dialogues:[
+      {id:11,title:"Kevadlilled",lines:[
+        {speaker:"A",fr:"Aimes-tu le printemps?",et:"Kas sa armastad kevadet?"},
+        {speaker:"B",fr:"Bien sûr.",et:"Muidugi."},
+        {speaker:"A",fr:"Mais pourquoi aimes-tu le printemps?",et:"Aga miks sa armastad kevadet?"},
+        {speaker:"B",fr:"Au printemps il fait beau (temps).",et:"Kevadel on ilus ilm."},
+        {speaker:"A",fr:"Et alors? En été aussi il fait beau (temps).",et:"Ja mis siis? Suvel on ka ilus ilm."},
+        {speaker:"B",fr:"Au printemps il fait du soleil et il fait chaud.",et:"Kevadel paistab päike ja on soe."},
+        {speaker:"A",fr:"En été aussi il fait du soleil et il fait chaud.",et:"Suvel on ka päike ja on soe."},
+        {speaker:"B",fr:"Au printemps il y a des oiseaux qui chantent.",et:"Kevadel on laulvaid linde."},
+        {speaker:"A",fr:"En été aussi il y a des oiseaux.",et:"Suvel on ka linde."},
+        {speaker:"B",fr:"Au printemps il y a des fleurs: des violettes, des narcisses, des tulipes.",et:"Kevadel on lilli: kannikesi, nartsisse, tulpe."},
+        {speaker:"A",fr:"Moi, je n'aime pas les narcisses et les tulipes. Je préfère les roses et les marguerites.",et:"Mina ei armasta nartsisse ja tulpe. Ma eelistan roose ja karikakraid."},
+        {speaker:"B",fr:"Écoute, mon cher (ma chère), tu es difficile!",et:"Kuule, mu kallis, sa oled raske iseloomuga!"},
+        {speaker:"A",fr:"Non, je ne suis pas difficile, mais je préfère l'été, car en été il y a des vacances.",et:"Ei, ma pole raske iseloomuga, aga ma eelistan suve, sest suvel on koolivaheaeg."},
+      ]},
+    ],songs:[{"title": "Adieu, l"hiver!", "type": "luuletus", "emoji": "🌸", "lines": [{"fr": "Adieu, l"hiver.", "et": "Jumalaga, talv."}, {"fr": "Vive le printemps!", "et": "Elagu kevad!"}, {"fr": "Tu vois, mon cher (ma chère),", "et": "Sa näed, mu kallis,"}, {"fr": "il fait beau temps.", "et": "on ilus ilm."}, {"fr": "Bonjour, la reine –", "et": "Tere, kuninganna –"}, {"fr": "ma vieille Cité;", "et": "mu vana Cité,"}, {"fr": "et toi, la Seine!", "et": "ja sina, Seine"i jõgi!"}, {"fr": "Oh, quelle beauté!", "et": "Oo, milline ilu!"}]}],
+  },
+  {id:48,pic:"🎨✏️📻🎾",title:"Leçon 48",subtitle:"Tegevused",emoji:"🎨",color:"#ea580c",
+    vocabulary:[
+      {fr:"je dessine",et:"ma joonistan",ex:"Je dessine une maison."},
+      {fr:"je mange",et:"ma söön",ex:"Je mange des bonbons."},
+      {fr:"j'écoute",et:"ma kuulan",ex:"J'écoute la radio."},
+      {fr:"lire",et:"lugema",ex:"Je lis. Tu lis. Il lit."},
+      {fr:"écrire",et:"kirjutama",ex:"J'écris. Tu écris. Il écrit."},
+      {fr:"les vacances",et:"koolivaheaeg",ex:"En été il y a des vacances."},
+      {fr:"la marguerite",et:"karikakar",ex:"Je préfère les marguerites."},
+      {fr:"difficile",et:"raske iseloomuga",ex:"Tu es difficile!"},
+    ],
+    dialogues:[
+      {id:12,title:"Mida sa teed?",lines:[
+        {speaker:"A",fr:"Qu'est-ce que tu fais?",et:"Mida sa teed?"},
+        {speaker:"B",fr:"Je dors.",et:"Ma magan."},
+        {speaker:"A",fr:"Et toi, qu'est-ce que tu fais?",et:"Ja sina, mida sa teed?"},
+        {speaker:"C",fr:"Je joue à la balle.",et:"Ma mängin palli."},
+        {speaker:"A",fr:"Et vous, qu'est-ce que vous faites?",et:"Ja teie, mida teie teete?"},
+        {speaker:"D",fr:"Nous lisons et nous écrivons.",et:"Me loeme ja kirjutame."},
+        {speaker:"A",fr:"Nous dessinons et nous mangeons.",et:"Me joonistame ja sööme."},
+        {speaker:"A",fr:"Nous allons à l'école.",et:"Me läheme kooli."},
+      ]},
+    ],songs:[{"title": "Dodo, l"enfant do", "type": "laul", "emoji": "🌙", "lines": [{"fr": "Dodo, l"enfant do,", "et": "Aiu-äiu, laps, äiu,"}, {"fr": "l"enfant dormira bien vite.", "et": "laps jääb magama hästi kiiresti."}, {"fr": "Dodo, l"enfant do,", "et": "Aiu-äiu, laps, äiu,"}, {"fr": "l"enfant dormira bientôt.", "et": "laps jääb magama varsti."}, {"fr": "Une poule blanche", "et": "Valge kana"}, {"fr": "est là dans la grange,", "et": "on seal küünis,"}, {"fr": "qui va faire un petit coco", "et": "ta muneb väikese muna"}, {"fr": "pour l"enfant qui fait dodo.", "et": "lapsele, kes tudub."}]}],
+  },
+  {id:49,pic:"🐄🐑🐇🐎",title:"Leçon 49",subtitle:"Taluloomad",emoji:"🐄",color:"#16a34a",
+    vocabulary:[
+      {fr:"avoir",et:"omama",ex:"J'ai un chat. Tu as un chien."},
+      {fr:"j'adore",et:"ma jumaldan",ex:"J'adore les vacances."},
+      {fr:"la mer",et:"meri",ex:"J'adore le soleil et la mer."},
+      {fr:"la campagne",et:"maa",ex:"Je préfère la campagne."},
+      {fr:"la ferme",et:"talu",ex:"Mes grand-parents ont une ferme."},
+      {fr:"le chat",et:"kass",ex:"Nous avons deux chats."},
+      {fr:"le chien",et:"koer",ex:"Nous avons un chien."},
+      {fr:"la vache",et:"lehm",ex:"Nous avons une vache."},
+      {fr:"le mouton",et:"lammas",ex:"Nous avons des moutons."},
+      {fr:"le lapin",et:"küülik",ex:"Nous avons des lapins."},
+      {fr:"le cheval",et:"hobune",ex:"J'adore les chevaux."},
+    ],
+    dialogues:[
+      {id:13,title:"Avez-vous des animaux?",lines:[
+        {speaker:"A",fr:"Aimes-tu les vacances?",et:"Kas sa armastad koolivaheaega?"},
+        {speaker:"B",fr:"J'adore les vacances: le soleil et la mer.",et:"Ma jumaldan koolivaheaega: päikest ja merd."},
+        {speaker:"A",fr:"Moi, je préfère la campagne.",et:"Mina eelistan maaelu."},
+        {speaker:"A",fr:"Avez-vous une ferme à la campagne?",et:"Kas teil on maal talu?"},
+        {speaker:"B",fr:"Oui, mes grand-parents ont une toute petite ferme.",et:"Jah, minu vanavanematel on väike talu."},
+        {speaker:"A",fr:"Avez-vous des animaux aussi?",et:"Kas teil on ka loomi?"},
+        {speaker:"B",fr:"Bien sûr. Nous avons deux chats et un chien.",et:"Muidugi. Meil on kaks kassi ja koer."},
+        {speaker:"A",fr:"Et c'est tout?",et:"Ja ongi kõik?"},
+        {speaker:"B",fr:"Mais non. Nous avons encore une vache, des moutons, des lapins, des oies, des poules et un coq.",et:"Ei muidugi. Meil on veel lehm, lambad, küülikud, haned, kanad ja kukk."},
+        {speaker:"A",fr:"Avez-vous un cheval ou un âne?",et:"Kas teil on hobune või eesel?"},
+        {speaker:"B",fr:"Non. Mes grand-parents ont un petit tracteur et une voiture.",et:"Ei. Minu vanavanematel on väike traktor ja auto."},
+        {speaker:"A",fr:"Alors ce n'est pas intéressant. Moi, j'adore les chevaux.",et:"Siis pole see huvitav. Mina jumaldan hobuseid."},
+      ]},
+    ],
+  },
+  {id:50,pic:"🐱🐢 — ❤️",title:"Leçon 50",subtitle:"C'est la vie!",emoji:"🐱",color:"#7c3aed",
+    vocabulary:[
+      {fr:"s'appeler",et:"nime kandma",ex:"Je m'appelle Marie."},
+      {fr:"Comment t'appelles-tu?",et:"Mis su nimi on?",ex:"Je m'appelle Pierre."},
+      {fr:"la tortue",et:"kilpkonn",ex:"J'ai une tortue qui s'appelle Framboise."},
+      {fr:"C'est la vie!",et:"Elu on juba selline!",ex:"C'est la vie!"},
+      {fr:"Oh, pardon!",et:"Oh, vabandust!",ex:"Oh, pardon, mademoiselle!"},
+      {fr:"n'est-ce pas?",et:"eks ole?",ex:"Tu as un chat, n'est-ce pas?"},
+    ],
+    dialogues:[
+      {id:14,title:"C'est la vie! — Pierre ja Marie",lines:[
+        {speaker:"Pierre",fr:"Oh, pardon, mademoiselle!",et:"Oh, vabandust, preili!"},
+        {speaker:"Marie",fr:"Oh, pardon, monsieur!",et:"Oh, vabandust, härra!"},
+        {speaker:"Pierre",fr:"Tu t'appelles comment?",et:"Mis su nimi on?"},
+        {speaker:"Marie",fr:"Je m'appelle Marie. Et toi, tu t'appelles comment?",et:"Minu nimi on Marie. Ja sina, mis su nimi on?"},
+        {speaker:"Pierre",fr:"Moi, je m'appelle Pierre.",et:"Mina, minu nimi on Pierre."},
+        {speaker:"Pierre",fr:"Tu as un chat, n'est-ce pas?",et:"Sul on kass, eks ole?"},
+        {speaker:"Marie",fr:"Oui, j'ai un chat qui s'appelle Minet.",et:"Jah, mul on kass, keda kutsutakse Minet'ks."},
+        {speaker:"Pierre",fr:"Moi aussi, j'ai un chat qui s'appelle Minet.",et:"Minal ka on kass, keda kutsutakse Minet'ks."},
+        {speaker:"Pierre",fr:"Moi, j'ai un chien qui s'appelle Riquet.",et:"Mul on koer, keda kutsutakse Riquet'ks."},
+        {speaker:"Marie",fr:"Mon Dieu! Moi aussi, j'ai un chien qui s'appelle Riquet.",et:"Issand jumal! Minal ka on koer, keda kutsutakse Riquet'ks."},
+        {speaker:"Pierre",fr:"Moi, j'ai encore une tortue qui s'appelle Framboise.",et:"Mul on veel kilpkonn, keda kutsutakse Framboise'ks."},
+        {speaker:"Marie",fr:"Mon Dieu! Moi aussi, j'ai une tortue qui s'appelle Framboise!",et:"Issand jumal! Minal ka on kilpkonn, keda kutsutakse Framboise'ks!"},
+        {speaker:"Pierre",fr:"Moi, j'ai une sœur qui s'appelle Marie Dubois.",et:"Mul on õde, kelle nimi on Marie Dubois."},
+        {speaker:"Marie",fr:"Et moi, j'ai un frère qui s'appelle Pierre Dubois.",et:"Ja minal on vend, kelle nimi on Pierre Dubois."},
+        {speaker:"Pierre",fr:"Bonjour, ma sœur Marie!",et:"Tere, mu õde Marie!"},
+        {speaker:"Marie",fr:"Bonjour, mon frère Pierre!",et:"Tere, mu vend Pierre!"},
+        {speaker:"Koos",fr:"C'est la vie!",et:"Selline on elu!"},
+      ]},
+    ],songs:[{"title": "Le tréma et la virgule", "type": "luuletus", "emoji": "📝", "lines": [{"fr": "Le tréma et la virgule,", "et": "Treema ja koma,"}, {"fr": "tous les deux sont ridicules.", "et": "mõlemad on naeruväärsed."}, {"fr": "Le point et l"apostrophe", "et": "Punkt ja ülakoma"}, {"fr": "sont sérieux comme notre prof.", "et": "on tõsised nagu meie õpetaja."}]}],
+  },
+  {id:51,pic:"🥖🍓 — 😋",title:"Leçon 51",subtitle:"Bon appétit!",emoji:"🥐",color:"#ea580c",
+    vocabulary:[
+      {fr:"manger",et:"sööma",ex:"Je mange du pain."},
+      {fr:"le pain",et:"leib",ex:"Je mange du pain."},
+      {fr:"la confiture",et:"moos",ex:"Je mange du pain et de la confiture."},
+      {fr:"Bon appétit!",et:"Head isu!",ex:"Bon appétit! Merci."},
+      {fr:"Pas de quoi.",et:"Pole tänu väärt.",ex:"Merci. Pas de quoi."},
+      {fr:"attraper des souris",et:"hiiri püüdma",ex:"Il attrape des souris."},
+    ],
+    dialogues:[
+      {id:15,title:"Bon appétit!",lines:[
+        {speaker:"Madeleine",fr:"Allô! François?",et:"Hallo! François?"},
+        {speaker:"François",fr:"Salut, Madeleine!",et:"Tervist, Madeleine!"},
+        {speaker:"Madeleine",fr:"Comment vas-tu?",et:"Kuidas sul läheb?"},
+        {speaker:"François",fr:"Je vais bien, merci.",et:"Mul läheb hästi, tänan."},
+        {speaker:"Madeleine",fr:"Et ton chat Minet, comment va-t-il?",et:"Ja sinu kass Minet, kuidas temal läheb?"},
+        {speaker:"François",fr:"Il va bien, lui aussi.",et:"Temal läheb ka hästi."},
+        {speaker:"Madeleine",fr:"Qu'est-ce qu'il fait?",et:"Mida ta teeb?"},
+        {speaker:"François",fr:"Il attrape des souris.",et:"Ta püüab hiiri."},
+        {speaker:"Madeleine",fr:"Et toi, qu'est-ce que tu fais?",et:"Ja sina, mida sa teed?"},
+        {speaker:"François",fr:"Je mange.",et:"Ma söön."},
+        {speaker:"Madeleine",fr:"Des souris?",et:"Hiiri?"},
+        {speaker:"François",fr:"Non. Je mange du pain et de la confiture.",et:"Ei. Ma söön leiba moosiga."},
+        {speaker:"Madeleine",fr:"Alors, bon appétit!",et:"Siis head isu!"},
+        {speaker:"François",fr:"Merci, mon ami.",et:"Tänan, mu sõber."},
+        {speaker:"Madeleine",fr:"Pas de quoi.",et:"Pole tänu väärt."},
+      ]},
+    ],
+  },
+  {id:52,pic:"🛁🧼🐷",title:"Leçon 52",subtitle:"Kuidas sa end pesed?",emoji:"🐷",color:"#db2777",
+    vocabulary:[
+      {fr:"se laver",et:"(ennast) pesema",ex:"Je me lave. Tu te laves."},
+      {fr:"je me lave",et:"ma pesen ennast",ex:"Je me lave avec du savon."},
+      {fr:"l'eau chaude",et:"soe vesi",ex:"Je me lave à l'eau chaude."},
+      {fr:"l'eau froide",et:"külm vesi",ex:"Je n'aime pas l'eau froide."},
+      {fr:"le savon",et:"seep",ex:"Je me lave avec du savon."},
+      {fr:"sale",et:"must / räpane",ex:"Tu es sale comme un cochon."},
+      {fr:"le cochon",et:"siga",ex:"Sale comme un cochon."},
+    ],
+    dialogues:[
+      {id:16,title:"Tu te laves comment?",lines:[
+        {speaker:"A",fr:"Tu te laves comment?",et:"Kuidas sa end pesed?"},
+        {speaker:"B",fr:"Je me lave avec les mains.",et:"Ma pesen end kätega."},
+        {speaker:"A",fr:"Bien sûr. Mais tu te laves à l'eau chaude ou à l'eau froide?",et:"Muidugi. Aga kas sa pesed end sooja või külma veega?"},
+        {speaker:"B",fr:"Je me lave à l'eau chaude.",et:"Ma pesen end sooja veega."},
+        {speaker:"A",fr:"Pourquoi à l'eau chaude?",et:"Miks sooja veega?"},
+        {speaker:"B",fr:"Je n'aime pas le froid.",et:"Ma ei armasta külma."},
+        {speaker:"A",fr:"Mais tu te laves à l'eau chaude comment?",et:"Aga kuidas sa end sooja veega pesed?"},
+        {speaker:"B",fr:"Comment, comment! Laisse-moi tranquille! Je me lave et c'est tout!",et:"Kuidas, kuidas! Jäta mind rahule! Ma pesen end ja ongi kõik!"},
+        {speaker:"A",fr:"Mais moi, je me lave avec du savon, voilà comme je suis!",et:"Aga mina pesen end seebiga, näe missugune ma olen!"},
+        {speaker:"B",fr:"Toi? Avec du savon!?",et:"Sina? Seebiga!?"},
+        {speaker:"A",fr:"Bien sûr!",et:"Muidugi!"},
+        {speaker:"B",fr:"Mais pourquoi es-tu sale comme un cochon?",et:"Aga miks sa oled siis must nagu siga?"},
+      ]},
+    ],
+  },
+  {id:53,pic:"🐱🐶🎵",title:"Leçon 53",subtitle:"Lemmikloomad",emoji:"🐱",color:"#16a34a",
+    vocabulary:[
+      {fr:"l'animal préféré",et:"lemmikloom",ex:"Quel est ton animal préféré?"},
+      {fr:"se laver eux-mêmes",et:"pesevad end ise",ex:"Les chats se lavent eux-mêmes."},
+      {fr:"la langue",et:"keel",ex:"Il se lave avec sa langue."},
+      {fr:"la patte",et:"käpp",ex:"Il se lave avec sa patte."},
+      {fr:"le canard",et:"part",ex:"Les canards font du rock."},
+      {fr:"la chanson",et:"laul",ex:"Ils chantent des chansons."},
+      {fr:"préféré(e)",et:"lemmik-",ex:"Mon animal préféré est le chat."},
+    ],
+    dialogues:[
+      {id:17,title:"Quel est ton animal préféré?",lines:[
+        {speaker:"A",fr:"Quel est ton animal préféré?",et:"Milline on sinu lemmikloom?"},
+        {speaker:"B",fr:"Le chat.",et:"Kass."},
+        {speaker:"A",fr:"Et tu as un chat, toi?",et:"Ja sul on kass, sinu käes?"},
+        {speaker:"B",fr:"Oui, j'ai un chat qui s'appelle Minet.",et:"Jah, mul on kass, keda kutsutakse Minet'ks."},
+        {speaker:"A",fr:"Mais pourquoi aimes-tu les chats? Moi, je préfère les chiens.",et:"Aga miks sa kasse armastad? Mina eelistan koeri."},
+        {speaker:"B",fr:"Moi, je préfère les chats, car les chats se lavent eux-mêmes (seuls).",et:"Mina eelistan kasse, sest kassid pesevad end ise (iseseisvalt)."},
+        {speaker:"A",fr:"Et ton chat Minet, il se lave aussi lui-même (tout seul)?",et:"Ja sinu kass Minet, ta peseb ka end ise?"},
+        {speaker:"B",fr:"Mais oui.",et:"Muidugi küll."},
+        {speaker:"A",fr:"Il se lave comment?",et:"Kuidas ta end peseb?"},
+        {speaker:"B",fr:"C'est très simple. Il mange du savon, puis il se lave avec sa langue et sa patte.",et:"See on väga lihtne. Ta sööb seepi, siis peseb end keele ja käpaga."},
+      ]},
+    ],songs:[{"title": "Les canards, les poules, le coq", "type": "luuletus", "emoji": "🎶", "lines": [{"fr": "Les canards, les poules, le coq,", "et": "Pardid, kanad, kukk,"}, {"fr": "jour et nuit ils font du rock.", "et": "ööl ja päeval teevad rokkmuusikat."}, {"fr": "Les moutons et les cochons", "et": "Lambad ja sead"}, {"fr": "tous en chœur chantent des chansons.", "et": "laulavad kõik kooris laule."}, {"fr": "Notre vache qui donne du lait,", "et": "Meie lehm, kes annab piima,"}, {"fr": "elle préfère le ballet.", "et": "tema eelistab balletti."}, {"fr": "Mais le cheval, le chien, le chat,", "et": "Aga hobune, koer, kass,"}, {"fr": "eux, ils aiment l"opéra.", "et": "nemad armastavad oooerit."}]}],
+  },
+  {id:54,pic:"📅🎵🎭",title:"Leçon 54",subtitle:"Nädalapäevad",emoji:"📅",color:"#2563eb",
+    vocabulary:[
+      {fr:"lundi",et:"esmaspäev",ex:"Lundi j'écoute du rock."},
+      {fr:"mardi",et:"teisipäev",ex:"Mardi j'écoute des chansons françaises."},
+      {fr:"mercredi",et:"kolmapäev",ex:"Mercredi je regarde le ballet."},
+      {fr:"jeudi",et:"neljapäev",ex:"Jeudi je regarde le ballet."},
+      {fr:"vendredi",et:"reede",ex:"Vendredi je regarde le ballet."},
+      {fr:"samedi",et:"laupäev",ex:"Samedi je vais à l'Opéra."},
+      {fr:"dimanche",et:"pühapäev",ex:"Dimanche je vais à l'Opéra."},
+      {fr:"tous les jours",et:"iga päev",ex:"Tous les jours j'écoute de la musique."},
+      {fr:"mélomane",et:"muusikahull",ex:"Je suis mélomane!"},
+    ],
+    dialogues:[
+      {id:18,title:"Je suis mélomane!",lines:[
+        {speaker:"A",fr:"Je suis mélomane, moi!",et:"Ma olen muusikahull!"},
+        {speaker:"B",fr:"Comment ça?",et:"Mismoodi?"},
+        {speaker:"A",fr:"Tous les jours j'écoute de la musique.",et:"Iga päev kuulan ma muusikat."},
+        {speaker:"B",fr:"Toute la semaine?",et:"Terve nädala?"},
+        {speaker:"A",fr:"Oui, toute la semaine.",et:"Jah, terve nädala."},
+        {speaker:"B",fr:"Par exemple?",et:"Näiteks?"},
+        {speaker:"A",fr:"Par exemple: lundi j'écoute du rock et mardi j'écoute des chansons françaises.",et:"Näiteks: esmaspäeval kuulan rokkmuusikat ja teisipäeval prantsuse laule."},
+        {speaker:"B",fr:"Et mercredi?",et:"Ja kolmapäeval?"},
+        {speaker:"A",fr:"Mercredi, jeudi et vendredi je regarde le ballet.",et:"Kolmapäeval, neljapäeval ja reedel vaatan balletti."},
+        {speaker:"B",fr:"Et samedi?",et:"Ja laupäeval?"},
+        {speaker:"A",fr:"Samedi et dimanche je vais à l'Opéra.",et:"Laupäeval ja pühapäeval käin Ooperis."},
+        {speaker:"B",fr:"Au Grand-Opéra?",et:"Suurde Ooperisse?"},
+        {speaker:"A",fr:"Non, samedi et dimanche je vais à l'Opéra de la Bastille.",et:"Ei, laupäeval ja pühapäeval käin Bastille Ooperis."},
+        {speaker:"B",fr:"Mais tu es fou (folle)!",et:"Aga sa oled ju hull!"},
+        {speaker:"A",fr:"Non, je ne suis pas fou (folle). Je suis mélomane, moi!",et:"Ei, ma pole hull. Ma olen muusikahull!"},
+      ]},
+    ],
+  },
+  {id:55,pic:"🗼🌹 — 💕",title:"Leçon 55",subtitle:"Armunud Pariisi",emoji:"🗼",color:"#7c3aed",
+    vocabulary:[
+      {fr:"se promener",et:"jalutama",ex:"Je me promène sur la Rive gauche."},
+      {fr:"amoureux / amoureuse",et:"armunud",ex:"Je suis amoureux de Paris."},
+      {fr:"chaque jeudi",et:"igal neljapäeval",ex:"Chaque jeudi aux Invalides."},
+      {fr:"sans doute",et:"kahtlemata",ex:"Tu vas sans doute au Louvre."},
+      {fr:"la Rive gauche",et:"Vasak kallas",ex:"Je me promène sur la Rive gauche."},
+    ],
+    dialogues:[
+      {id:19,title:"Je suis amoureux de Paris",lines:[
+        {speaker:"A",fr:"Je suis amoureux (amoureuse) de Paris.",et:"Ma olen armunud Pariisi."},
+        {speaker:"B",fr:"Comment ça?",et:"Mismoodi?"},
+        {speaker:"A",fr:"Tous les jours je me promène sur la Rive gauche ou sur la Rive droite.",et:"Iga päev jalutan ma Vasakul kaldal või Paremal kaldal."},
+        {speaker:"B",fr:"Par exemple?",et:"Näiteks?"},
+        {speaker:"A",fr:"Par exemple, lundi je vais à Montmartre, car j'adore le Sacré-Cœur.",et:"Näiteks esmaspäeval käin Montmartre'il, sest ma jumaldan Sacré-Cœur'i."},
+        {speaker:"B",fr:"Et mardi?",et:"Ja teisipäeval?"},
+        {speaker:"A",fr:"Mardi je me promène aux Champs-Élysées. J'aime bien la place de l'Étoile et la place de la Concorde.",et:"Teisipäeval jalutan Champs-Élysées'l. Mulle meeldib Étoile'i väljak ja Concorde'i väljak."},
+        {speaker:"B",fr:"Mercredi tu vas sans doute au Louvre, n'est-ce pas?",et:"Kolmapäeval lähed kahtlemata Louvre'i, eks ole?"},
+        {speaker:"A",fr:"Non. Mercredi je me promène dans le Quartier Latin et jeudi je vais aux Invalides.",et:"Ei. Kolmapäeval jalutan Ladina kvartalis ja neljapäeval käin Invalides'is."},
+        {speaker:"B",fr:"Chaque jeudi aux Invalides?",et:"Igal neljapäeval Invalides'is?"},
+        {speaker:"A",fr:"Bien sûr! J'adore Napoléon.",et:"Muidugi! Ma jumaldan Napoleoni."},
+        {speaker:"B",fr:"Tu as mauvais goût. Moi, je préfère Henri Quatre sur le Pont-Neuf.",et:"Sul on halb maitse. Mina eelistan Henri IV-t Pont-Neuf'il."},
+        {speaker:"A",fr:"C'est ton problème. Vendredi je suis à la Bastille.",et:"See on sinu probleem. Reedel olen Bastille'l."},
+        {speaker:"B",fr:"Et samedi et dimanche tu vas où?",et:"Ja laupäeval ja pühapäeval kuhu sa lähed?"},
+        {speaker:"A",fr:"Samedi je vais à la Sainte-Chapelle et dimanche je vais à l'Opéra.",et:"Laupäeval käin Sainte-Chapelle'is ja pühapäeval Ooperis."},
+        {speaker:"B",fr:"Qu'est-ce que tu fais à l'Opéra?",et:"Mis sa Ooperis teed?"},
+        {speaker:"A",fr:"Je dors.",et:"Ma magan."},
+      ]},
+    ],
+  },
+  {id:56,pic:"☕🥐 — 🇫🇷",title:"Leçon 56",subtitle:"Martin ja Justine",emoji:"🥖",color:"#d97706",
+    vocabulary:[
+      {fr:"le copain / la copine",et:"sõber / sõbratar",ex:"J'ai un copain qui s'appelle Justin."},
+      {fr:"vrai(e) Parisien(ne)",et:"tõeline pariislane",ex:"Justin est un vrai Parisien."},
+      {fr:"chaque matin",et:"igal hommikul",ex:"Chaque matin il se promène."},
+      {fr:"la tartine",et:"võileib",ex:"Elle mange des tartines."},
+      {fr:"boire",et:"jooma",ex:"Je bois du lait."},
+      {fr:"je bois du lait",et:"ma joon piima",ex:"Je bois du lait."},
+    ],
+    dialogues:[
+      {id:20,title:"Martin ja Martine — Estonlased Pariisis",lines:[
+        {speaker:"Martin",fr:"Moi, je m'appelle Martin. Je suis Estonien et j'habite à Tallinn.",et:"Mina, minu nimi on Martin. Ma olen eestlane ja elan Tallinnas."},
+        {speaker:"Martin",fr:"Mais j'ai un copain qui est Français et qui habite à Paris au Quartier Latin.",et:"Aga mul on sõber, kes on prantslane ja elab Pariisis Ladina kvartalis."},
+        {speaker:"Martin",fr:"Mon copain s'appelle Justin et il est tout noir, car ses parents sont Africains.",et:"Minu sõbra nimi on Justin ja ta on täiesti must, sest ta vanemad on aafriklased."},
+        {speaker:"Martin",fr:"Justin est un vrai Parisien. Il est amoureux de Paris.",et:"Justin on tõeline pariislane. Ta on armunud Pariisi."},
+        {speaker:"Martin",fr:"Chaque matin il se promène avec son chien sur le boulevard des Italiens.",et:"Igal hommikul jalutab ta oma koeraga Itaallaste puiesteel."},
+        {speaker:"Martine",fr:"Moi, je m'appelle Martine. Je suis Estonienne et j'habite à Tallinn.",et:"Mina, minu nimi on Martine. Ma olen eestlane ja elan Tallinnas."},
+        {speaker:"Martine",fr:"Mais j'ai une copine qui est Française et qui habite à Paris sur le boulevard des Capucines.",et:"Aga mul on sõbratar, kes on prantslanna ja elab Pariisis Kapuutsinite puiesteel."},
+        {speaker:"Martine",fr:"Ma copine s'appelle Justine. Justine est blondine, car ses parents sont de Normandie.",et:"Minu sõbratare nimi on Justine. Justine on blondiin, sest tema vanemad on Normandiast."},
+        {speaker:"Martine",fr:"Justine est une vraie Parisienne. Elle est amoureuse de Paris.",et:"Justine on tõeline pariisitar. Ta on armunud Pariisi."},
+        {speaker:"Martine",fr:"Chaque matin elle mange des tartines au Café de la Paix sur le boulevard des Capucines.",et:"Igal hommikul sööb ta võileibu Café de la Paix's Kapuutsinite puiesteel."},
+      ]},
+    ],songs:[{"title": "Martin, Justin et Valentin", "type": "luuletus", "emoji": "👫", "lines": [{"fr": "Martin, Justin et Valentin,", "et": "Martin, Justin ja Valentin,"}, {"fr": "tous les trois sont mes copains.", "et": "kõik kolm on minu sõbrad."}, {"fr": "Martine, Justine et Valentine,", "et": "Martine, Justine ja Valentine,"}, {"fr": "toutes les trois sont mes copines.", "et": "kõik kolm on minu sõbrannad."}]}],
+  },
+  {id:57,pic:"🏖️🌊 — 🌤️",title:"Leçon 57",subtitle:"Laurent ja Marianne",emoji:"🌊",color:"#0d9488",
+    vocabulary:[
+      {fr:"parfois",et:"mõnikord",ex:"Il est parfois gentil et parfois méchant."},
+      {fr:"méchant(e)",et:"kuri / paha",ex:"Elle est parfois méchante."},
+      {fr:"charmant(e)",et:"sarmikas",ex:"Valentin est charmant."},
+      {fr:"au bord de la mer",et:"mere ääres",ex:"Ils se promènent au bord de la mer."},
+      {fr:"la banane",et:"banaan",ex:"Je mange des bananes."},
+    ],
+    dialogues:[
+      {id:21,title:"Laurent ja Marianne",lines:[
+        {speaker:"A",fr:"Laurent Leblanc habite avec ses parents à Rouen en Normandie.",et:"Laurent Leblanc elab koos vanematega Rouenis Normandias."},
+        {speaker:"A",fr:"Laurent a huit ans et il va à l'école.",et:"Laurentil on kaheksa aastat ja ta käib koolis."},
+        {speaker:"A",fr:"Comme tous les enfants il est parfois gentil et parfois méchant.",et:"Nagu kõik lapsed on ta mõnikord armas ja mõnikord paha."},
+        {speaker:"A",fr:"Aujourd'hui il fait beau temps, il fait du soleil et les oiseaux chantent. C'est le printemps.",et:"Täna on ilus ilm, paistab päike ja linnud laulavad. On kevad."},
+        {speaker:"A",fr:"Laurent Leblanc et son copain Valentin Accent Circonflexe vont aux champs.",et:"Laurent Leblanc ja tema sõber Valentin Accent Circonflexe lähevad põldudele."},
+        {speaker:"A",fr:"Valentin est charmant. Il lit à Laurent le conte de Charles Perrault \"La Belle au bois dormant\".",et:"Valentin on sarmikas. Ta loeb Laurentile Charles Perrault' muinasjutu \"Uinuv kaunitar\"."},
+        {speaker:"B",fr:"Marianne Cézanne habite à Cannes.",et:"Marianne Cézanne elab Cannes'is."},
+        {speaker:"B",fr:"Comme toutes les fillettes elle est parfois gentille et parfois méchante.",et:"Nagu kõik tüdrukud on ta mõnikord armas ja mõnikord paha."},
+        {speaker:"B",fr:"Marianne a une copine qui s'appelle Jeanne Accent Aigu.",et:"Mariannel on sõbratar, kelle nimi on Jeanne Accent Aigu."},
+        {speaker:"B",fr:"Chaque samedi et dimanche Marianne et Jeanne se promènent au bord de la mer.",et:"Igal laupäeval ja pühapäeval jalutavad Marianne ja Jeanne mere ääres."},
+        {speaker:"B",fr:"Aujourd'hui il fait mauvais temps, il pleut et il fait du vent.",et:"Täna on halb ilm, sajab vihma ja puhub tuul."},
+        {speaker:"B",fr:"Jeanne et Marianne vont au café et mangent des tartines et des bananes.",et:"Jeanne ja Marianne lähevad kohvikusse ja söövad võileibu ja banaane."},
+      ]},
+    ],
+  },
+  {id:58,pic:"🌭🍯 — 😄",title:"Leçon 58",subtitle:"Gaston Dijonist",emoji:"🌭",color:"#ea580c",
+    vocabulary:[
+      {fr:"acheter",et:"ostma",ex:"Il achète des bonbons."},
+      {fr:"la moutarde",et:"sinep",ex:"La moutarde de Dijon est très bonne."},
+      {fr:"le saucisson",et:"vorst",ex:"Je mange du saucisson."},
+      {fr:"la glace",et:"jäätis",ex:"Je mange de la glace."},
+      {fr:"le jus d'orange",et:"apelsinimahl",ex:"Je bois du jus d'orange."},
+      {fr:"après",et:"pärast",ex:"Après la manifestation."},
+    ],
+    dialogues:[
+      {id:22,title:"Gaston ja Yvonne Dijonist",lines:[
+        {speaker:"A",fr:"Gaston Dupont est un bon garçon. Il habite à Dijon.",et:"Gaston Dupont on hea poiss. Ta elab Dijonis."},
+        {speaker:"A",fr:"Dijon est la capitale de la Bourgogne et la capitale de la moutarde.",et:"Dijon on Burgundia pealinn ja sinepipealinn."},
+        {speaker:"A",fr:"Gaston a neuf ans et il va à l'école.",et:"Gastonil on üheksa aastat ja ta käib koolis."},
+        {speaker:"A",fr:"Il a un copain qui s'appelle Léon.",et:"Tal on sõber, kelle nimi on Léon."},
+        {speaker:"A",fr:"Léon est aussi un bon garçon. Il achète parfois des bonbons à son ami Gaston.",et:"Léon on ka hea poiss. Ta ostab mõnikord oma sõbrale Gastonile komme."},
+        {speaker:"A",fr:"Gaston adore les bonbons, car les bonbons sont bons.",et:"Gaston jumaldab komme, sest kommid on maitsvad."},
+        {speaker:"B",fr:"La grande sœur de Gaston s'appelle Yvonne.",et:"Gastoni vanem õde on nimega Yvonne."},
+        {speaker:"B",fr:"Elle habite à Paris où elle va à la Sorbonne.",et:"Ta elab Pariisis, kus ta käib Sorbonne'is."},
+        {speaker:"B",fr:"Elle est très gentille. Chaque samedi elle vient à Dijon.",et:"Ta on väga armas. Igal laupäeval tuleb ta Dijoni."},
+        {speaker:"B",fr:"Et alors elle va avec Gaston et Léon à la manifestation. Que de joie et que d'émotions!",et:"Ja siis läheb ta koos Gastoni ja Léoniga meeleavaldusel. Kui palju rõõmu ja emotsioone!"},
+        {speaker:"B",fr:"Après la manifestation Yvonne, Gaston et Léon vont au café.",et:"Pärast meeleavaldust lähevad Yvonne, Gaston ja Léon kohvikusse."},
+        {speaker:"B",fr:"Les garçons mangent des bonbons et Yvonne mange du saucisson avec de la moutarde.",et:"Poisid söövad komme ja Yvonne sööb vorsti sinepiga."},
+        {speaker:"B",fr:"La moutarde de Dijon est très bonne. Vive la moutarde!",et:"Dijoni sinep on väga maitsev. Elagu sinep!"},
+      ]},
+    ],
+  },
+  {id:59,pic:"🧀🌸 — 👃",title:"Leçon 59",subtitle:"Parfüümid ja juust",emoji:"🧀",color:"#d97706",
+    vocabulary:[
+      {fr:"le fromage",et:"juust",ex:"Quel est ton fromage préféré?"},
+      {fr:"le camembert",et:"kamambäär",ex:"J'aime bien le camembert."},
+      {fr:"le parfum",et:"parfüüm",ex:"Son parfum préféré est Chanel No 5."},
+      {fr:"ça sent bon",et:"lõhnab hästi",ex:"Ça sent bon."},
+      {fr:"ça sent mauvais",et:"lõhnab halvasti",ex:"Ça sent mauvais."},
+      {fr:"le magasin",et:"kauplus",ex:"Ils vont au magasin."},
+    ],
+    dialogues:[
+      {id:23,title:"Madame Lebrun ja parfüümid",lines:[
+        {speaker:"A",fr:"Madame Lebrun habite à Verdun en Lorraine.",et:"Madame Lebrun elab Verdun'is Lorraine'is."},
+        {speaker:"A",fr:"Elle est belle et brune. Ses cheveux sont bruns, ses yeux sont bruns, mais sa peau est blanche.",et:"Ta on ilus ja pruunikas. Tema juuksed on pruunid, silmad pruunid, aga nahk on valge."},
+        {speaker:"A",fr:"Madame Lebrun est toujours bien parfumée. Elle adore les parfums.",et:"Madame Lebrun on alati hästi parfümeeritud. Ta jumaldab parfüüme."},
+        {speaker:"A",fr:"Son parfum préféré est \"Chanel No 5\".",et:"Tema lemmikparfüüm on \"Chanel No 5\"."},
+        {speaker:"B",fr:"Son mari Vincent adore aussi les parfums. Il aime bien \"Égoïste\".",et:"Tema abikaasa Vincent jumaldab ka parfüüme. Talle meeldib \"Égoïste\"."},
+        {speaker:"B",fr:"Chaque lundi monsieur et madame Lebrun vont au magasin pour acheter un bon parfum.",et:"Igal esmaspäeval lähevad härra ja proua Lebrun poodi, et osta hea parfüüm."},
+        {speaker:"B",fr:"C'est cher, mais ça sent bon.",et:"See on kallis, aga lõhnab hästi."},
+      ]},
+      {id:231,title:"Juust ja parfüüm",lines:[
+        {speaker:"A",fr:"Quel est ton fromage préféré?",et:"Milline on sinu lemmikjuust?"},
+        {speaker:"B",fr:"Moi, j'aime bien le camembert. Et toi?",et:"Mina armastan kamambääri. Ja sina?"},
+        {speaker:"A",fr:"Moi, je n'aime pas le camembert, car ça sent mauvais.",et:"Mina ei armasta kamambääri, sest see lõhnab halvasti."},
+        {speaker:"B",fr:"Quel est ton parfum préféré?",et:"Milline on sinu lemmikparfüüm?"},
+        {speaker:"A",fr:"Moi, j'aime bien \"Égoïste\" de Chanel.",et:"Mina armastan Chaneli \"Égoïste'i\"."},
+        {speaker:"B",fr:"Moi aussi, j'aime bien \"Égoïste\". C'est un très bon parfum pour hommes.",et:"Mina ka armastan \"Égoïste'i\". See on väga hea meeste parfüüm."},
+        {speaker:"A",fr:"J'adore ça. Ça sent bon.",et:"Ma jumaldan seda. See lõhnab hästi."},
+      ]},
+    ],
+  },
+  {id:60,pic:"🎉🇫🇷 — 🌟",title:"Leçon 60",subtitle:"Kordamine",emoji:"🎉",color:"#7c3aed",
+    vocabulary:[
+      {fr:"le boulevard",et:"bulvar / puiestee",ex:"Il se promène sur le boulevard."},
+      {fr:"vrai(e)",et:"tõeline",ex:"Elle est une vraie Parisienne."},
+      {fr:"chaque jour",et:"iga päev",ex:"Chaque jour elle mange des tartines."},
+      {fr:"Vivent les vacances!",et:"Elagu koolivaheaeg!",ex:"Vivent les vacances!"},
+      {fr:"bonsoir",et:"tere õhtust",ex:"Bonsoir, ma mère!"},
+    ],
+    dialogues:[
+      {id:24,title:"Kordamine — Kõik tegelased",lines:[
+        {speaker:"Martin",fr:"Moi, je m'appelle Martin. Je suis Estonien, mais j'ai un copain qui habite à Paris au Quartier Latin.",et:"Mina, minu nimi on Martin. Ma olen eestlane, aga mul on sõber, kes elab Pariisis Ladina kvartalis."},
+        {speaker:"Martin",fr:"Il s'appelle Justin. Chaque matin Justin se promène avec son chien sur le boulevard des Italiens.",et:"Tema nimi on Justin. Igal hommikul jalutab Justin oma koeraga Itaallaste puiesteel."},
+        {speaker:"Martin",fr:"Sa sœur Ernestine est une vraie Parisienne.",et:"Tema õde Ernestine on tõeline pariisitar."},
+        {speaker:"Martin",fr:"Chaque jour elle mange des tartines au Café de la Paix sur le boulevard des Capucines.",et:"Iga päev sööb ta võileibu Café de la Paix's Kapuutsinite puiesteel."},
+        {speaker:"A",fr:"Laurent Leblanc habite avec ses parents à Rouen. Comme tous les enfants il est parfois gentil et parfois méchant.",et:"Laurent Leblanc elab koos vanematega Rouenis. Nagu kõik lapsed on ta mõnikord armas ja mõnikord paha."},
+        {speaker:"B",fr:"Marianne Cézanne habite à Cannes. Sa copine Jeanne habite aussi à Cannes.",et:"Marianne Cézanne elab Cannes'is. Tema sõbratar Jeanne elab ka Cannes'is."},
+        {speaker:"B",fr:"Chaque dimanche Jeanne et Marianne se promènent au bord de la mer. Là elles mangent des bananes.",et:"Igal pühapäeval jalutavad Jeanne ja Marianne mere ääres. Seal söövad nad banaane."},
+        {speaker:"C",fr:"Gaston Dupont est un bon garçon. Léon est aussi un bon garçon. Ils habitent à Dijon.",et:"Gaston Dupont on hea poiss. Léon on ka hea poiss. Nad elavad Dijonis."},
+        {speaker:"C",fr:"Mais la sœur de Gaston Yvonne va à la Sorbonne. Elle est très bonne.",et:"Aga Gastoni õde Yvonne käib Sorbonne'is. Ta on väga armas."},
+        {speaker:"C",fr:"Chaque samedi quand elle vient à Dijon, elle va avec Gaston et Léon à la manifestation. Que de joie et que d'émotions!",et:"Igal laupäeval, kui ta Dijoni tuleb, läheb ta koos Gastoni ja Léoniga meeleavaldusel. Kui palju rõõmu!"},
+        {speaker:"D",fr:"Madame Lebrun habite à Verdun. Elle est belle et brune. Elle est toujours bien parfumée.",et:"Madame Lebrun elab Verdun'is. Ta on ilus ja pruunikas. Ta on alati hästi parfümeeritud."},
+        {speaker:"D",fr:"Son parfum préféré est \"Coco\" de Chanel. Chaque lundi madame Lebrun achète un bon parfum.",et:"Tema lemmikparfüüm on Chaneli \"Coco\". Igal esmaspäeval ostab madame Lebrun hea parfüümi."},
+        {speaker:"D",fr:"C'est cher. Mais ça sent bon. Vivent les parfums!",et:"See on kallis. Aga lõhnab hästi. Elagu parfüümid!"},
+        {speaker:"Kõik",fr:"VIVENT LES VACANCES!",et:"ELAGU KOOLIVAHEAEG!"},
+      ]},
+    ],
+  },
+];
+
+async function callClaude(messages,system){
+  try{
+    const res=await fetch("https://api.anthropic.com/v1/messages",{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,system,messages}),
+    });
+    const d=await res.json();
+    if(d.error)return null;
+    return d.content?.[0]?.text||null;
+  }catch(e){return null;}
+}
+
+// ─── CSS-illustratsioonid ─────────────────────────────────────────────────────
+function EiffelTower(){
+  return(
+    <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
+      <div style={{width:2,height:14,background:"#374151",borderRadius:2}}/>
+      <div style={{width:12,height:2,background:"#374151",borderRadius:1}}/>
+      <div style={{width:20,height:2,background:"#374151",borderRadius:1}}/>
+      <div style={{width:28,height:2,background:"#374151",borderRadius:1}}/>
+      <div style={{width:34,height:3,background:"#374151",borderRadius:1}}/>
+      <div style={{display:"flex",gap:12}}>
+        <div style={{width:3,height:10,background:"#374151",borderRadius:2,transform:"rotate(10deg)"}}/>
+        <div style={{width:3,height:10,background:"#374151",borderRadius:2,transform:"rotate(-10deg)"}}/>
+      </div>
+    </div>
+  );
+}
+function FrenchFlag(){
+  return(
+    <div style={{display:"flex",height:22,width:34,borderRadius:4,overflow:"hidden",boxShadow:"0 2px 8px rgba(0,0,0,.15)"}}>
+      <div style={{flex:1,background:"#002395"}}/>
+      <div style={{flex:1,background:"#fff"}}/>
+      <div style={{flex:1,background:"#ED2939"}}/>
+    </div>
+  );
+}
+
+// ─── Flashcards ───────────────────────────────────────────────────────────────
+
+// ─── Global speed state ───────────────────────────────────────────────────────
+let globalSpeed = 1;
+const speedListeners = new Set();
+function setGlobalSpeed(sp) {
+  globalSpeed = sp;
+  speedListeners.forEach(fn => fn(sp));
+}
+
+function SpeedBar({color}) {
+  const [sp, setSp] = React.useState(globalSpeed);
+  React.useEffect(() => {
+    speedListeners.add(setSp);
+    return () => speedListeners.delete(setSp);
+  }, []);
+  return (
+    <div style={{display:"flex",gap:6,marginBottom:10,alignItems:"center"}}>
+      <span style={{fontSize:12,color:"#9ca3af",fontWeight:700}}>🎚️</span>
+      {[0.5,0.75,1,1.25].map(s=>(
+        <button key={s} className="btn btn-sm"
+          style={{background:sp===s?color:"#f3f4f6",color:sp===s?"#fff":"#6b7280",padding:"3px 10px",fontSize:11}}
+          onClick={()=>setGlobalSpeed(s)}>{s}x</button>
+      ))}
+    </div>
+  );
+}
+
+function Flashcards({chapter, onXp}){
+  const [idx,setIdx]=useState(0);
+  const [flipped,setFlipped]=useState(false);
+  const [known,setKnown]=useState(new Set());
+  const [showEx,setShowEx]=useState(false);
+  const w=chapter.vocabulary[idx];
+  const C=chapter.color;
+  const pct=Math.round((known.size/chapter.vocabulary.length)*100);
+
+  const [flashFb, setFlashFb] = useState(null); // "correct" | "wrong"
+
+  function next(mark){
+    if(mark){
+      setKnown(k=>new Set([...k,idx]));
+      setFlashFb("correct");
+      playSound("correct");
+      if(onXp) onXp(5, chapter.color);
+    } else {
+      setFlashFb("wrong");
+      playSound("wrong");
+    }
+    setTimeout(()=>setFlashFb(null),400);
+    setFlipped(false);setShowEx(false);
+    setTimeout(()=>setIdx(i=>(i+1)%chapter.vocabulary.length),150);
+  }
+
+  return(
+    <div style={{padding:16,maxWidth:500,margin:"0 auto"}}>
+      <div style={{marginBottom:14}}>
+        <div style={{display:"flex",justifyContent:"space-between",fontSize:13,fontWeight:700,color:"#374151",marginBottom:6}}>
+          <span>{idx+1}/{chapter.vocabulary.length}</span>
+          <span style={{color:C}}>{known.size} õpitud ({pct}%)</span>
+        </div>
+        <div style={{height:8,background:"#e5e7eb",borderRadius:4,overflow:"hidden"}}>
+          <div style={{height:"100%",width:`${pct}%`,background:C,borderRadius:4,transition:"width .4s"}}/>
+        </div>
+      </div>
+
+      <div style={{textAlign:"center",marginBottom:12,padding:"14px 0",background:`linear-gradient(135deg,${C}10,${C}05)`,borderRadius:16,border:`1.5px dashed ${C}40`}}>
+        <div style={{fontSize:42,lineHeight:1.2,marginBottom:4}}>{chapter.pic||chapter.emoji}</div>
+        <div style={{fontSize:13,fontWeight:700,color:C}}>{chapter.subtitle}</div>
+      </div>
+      <SpeedBar color={C}/>
+
+      <div onClick={()=>setFlipped(!flipped)}
+        className={flashFb==="wrong"?"shake":flashFb==="correct"?"correct":""}
+        style={{
+        background:flashFb==="correct"?"#dcfce7":flashFb==="wrong"?"#fee2e2":flipped?`linear-gradient(135deg,${C}18,${C}28)`:"linear-gradient(135deg,#fff,#f8faff)",
+        border:`3px solid ${flashFb==="correct"?"#16a34a":flashFb==="wrong"?"#ef4444":flipped?C:"#e5e7eb"}`,
+        borderRadius:24,padding:32,textAlign:"center",cursor:"pointer",
+        minHeight:190,display:"flex",flexDirection:"column",justifyContent:"center",alignItems:"center",gap:10,
+        boxShadow:flipped?`0 8px 28px ${C}28`:"0 4px 18px rgba(0,0,0,.06)",
+        transition:"all .25s",userSelect:"none",
+      }}>
+        <div style={{fontSize:10,letterSpacing:3,textTransform:"uppercase",color:"#9ca3af",fontWeight:700}}>
+          {flipped?"🇪🇪 Eesti keeles":"🇫🇷 Prantsuse keeles"}
+        </div>
+        <div style={{fontSize:28,fontWeight:800,color:flipped?C:"#1f2937",lineHeight:1.2}}>
+          {flipped?w.et:w.fr}
+        </div>
+        {!flipped&&<div style={{fontSize:12,color:"#9ca3af"}}>👆 klõpsa tõlke nägemiseks</div>}
+      </div>
+
+      <div style={{display:"flex",gap:8,marginTop:12,flexWrap:"wrap"}}>
+        <button className="btn btn-sm" style={{background:C,color:"#fff"}} onClick={e=>{e.stopPropagation();speak(w.fr,globalSpeed);}}>🔊 Kuula</button>
+        {w.ex&&<button className="btn btn-sm" style={{background:"#f3f4f6",color:"#374151"}} onClick={()=>setShowEx(!showEx)}>
+          📝 {showEx?"Peida":"Näitelause"}
+        </button>}
+      </div>
+
+      {showEx&&<div style={{marginTop:10,background:`${C}12`,border:`2px solid ${C}30`,borderRadius:14,padding:12}}>
+        <div style={{fontSize:14,color:"#1f2937",fontWeight:600}}>{w.ex}</div>
+        <button className="btn btn-sm" style={{background:C,color:"#fff",marginTop:8}} onClick={()=>speak(w.ex,globalSpeed)}>🔊 Kuula lauset</button>
+      </div>}
+
+      <div style={{display:"flex",gap:10,marginTop:14,justifyContent:"center"}}>
+        <button className="btn btn-sm" style={{background:"#f3f4f6",color:"#374151"}} onClick={()=>{setFlipped(false);setShowEx(false);setIdx(i=>(i-1+chapter.vocabulary.length)%chapter.vocabulary.length);}}>← Eelmine</button>
+        <button className="btn btn-sm" style={{background:"#fee2e2",color:"#b91c1c",fontSize:14}} onClick={()=>next(false)}>🔄 Korda</button>
+        <button className="btn btn-sm" style={{background:"#dcfce7",color:"#15803d",fontSize:14}} onClick={()=>next(true)}>⭐ Tean! +5XP</button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Dialoog ──────────────────────────────────────────────────────────────────
+function Dialogue({chapter, onXp}){
+  const [sel,setSel]=useState(null);
+  const [mode,setMode]=useState("read"); // read | learn | chat
+  const [li,setLi]=useState(0);
+  const [showEt,setShowEt]=useState(false);
+  const [rec,setRec]=useState(false);
+  const [recText,setRecText]=useState("");
+  const [fb,setFb]=useState(null);
+  const [fbOk,setFbOk]=useState(null); // true/false/null
+  const [loading,setLoading]=useState(false);
+  const [playing,setPlaying]=useState(false);
+  const [hlIdx,setHlIdx]=useState(null);
+  // Chat mode state
+  const [chatRole,setChatRole]=useState(1); // which speaker index laps plays (0 or 1)
+  const [chatStep,setChatStep]=useState(0);
+  const [chatInput,setChatInput]=useState("");
+  const [chatHistory,setChatHistory]=useState([]);
+  const [chatDone,setChatDone]=useState(false);
+  const synth=useRef(window.speechSynthesis);
+  const C=chapter.color;
+
+  useEffect(()=>{return()=>synth.current.cancel();},[]);
+
+  function speakLine(text,cb){
+    synth.current.cancel();
+    setTimeout(()=>{
+      const u=new SpeechSynthesisUtterance(text);
+      u.lang="fr-FR";u.rate=globalSpeed;
+      const fr=window.speechSynthesis.getVoices().find(v=>v.lang.startsWith("fr"));
+      if(fr)u.voice=fr;
+      if(cb)u.onend=cb;
+      synth.current.speak(u);
+    },50);
+  }
+
+  function playAll(lines){
+    synth.current.cancel();setPlaying(true);
+    let i=0;
+    function next(){
+      if(i>=lines.length){setPlaying(false);setHlIdx(null);return;}
+      setHlIdx(i);
+      const u=new SpeechSynthesisUtterance(lines[i].fr);
+      u.lang="fr-FR";u.rate=globalSpeed;
+      const fr=window.speechSynthesis.getVoices().find(v=>v.lang.startsWith("fr"));
+      if(fr)u.voice=fr;
+      u.onend=()=>{i++;setTimeout(next,500);};
+      synth.current.speak(u);
+    }
+    next();
+  }
+  function stopAll(){synth.current.cancel();setPlaying(false);setHlIdx(null);}
+
+  // ── Mic check — leebe versioon ──
+  function checkMicSimple(text, targetFr) {
+    // Lihtsustatud kontroll ilma API-ta — võrdle sõnu
+    const clean = s => s.toLowerCase().replace(/[^a-zàâäéèêëîïôùûüç\s]/g,'').trim();
+    const said = clean(text);
+    const target = clean(targetFr);
+    const targetWords = target.split(' ');
+    const saidWords = said.split(' ');
+    const matches = targetWords.filter(w => saidWords.some(s => s.includes(w) || w.includes(s))).length;
+    const score = matches / targetWords.length;
+    if(score >= 0.6) return {ok:true, msg:"Tubli! 🌟 Kuulsin sind hästi!"};
+    if(score >= 0.3) return {ok:true, msg:"Väga hea katse! 👍 Proovi veel kord."};
+    return {ok:false, msg:"Proovi uuesti! 💪 Kuula kõigepealt ja siis korda."};
+  }
+
+  function checkMic(){
+    if(!recText.trim())return;
+    const line=sel.lines[li];
+    const result = checkMicSimple(recText, line.fr);
+    setFb(result.msg);
+    setFbOk(result.ok);
+    if(result.ok && onXp) onXp(3, C);
+  }
+
+  function startVoice(){
+    const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+    if(!SR){alert("Brauser ei toeta kõnetuvastust. Proovi Chrome'i.");return;}
+    const r=new SR();r.lang="fr-FR";
+    r.onstart=()=>{setRec(true);setRecText("");setFb(null);setFbOk(null);};
+    r.onend=()=>setRec(false);
+    r.onresult=e=>setRecText(e.results[0][0].transcript);
+    r.onerror=()=>{setRec(false);setFb("Mikrofon ei töötanud. Proovi uuesti! 🎤");setFbOk(false);};
+    r.start();
+  }
+
+  // ── Chat mode ──
+  function startChat(dlg) {
+    const speakers=[...new Set(dlg.lines.map(l=>l.speaker))];
+    const lapsSpeaker=speakers.length>1?speakers[1]:speakers[0];
+    // Find first laps line index
+    const firstLapsIdx=dlg.lines.findIndex(l=>l.speaker===lapsSpeaker);
+    setSel(dlg);
+    setMode("chat");
+    setChatStep(firstLapsIdx>=0?firstLapsIdx:0); // start at first laps line
+    setChatHistory([]);
+    setChatDone(false);
+    setChatInput("");
+    setChatRole(lapsSpeaker);
+    // Auto-speak all program lines before first laps line
+    let delay=400;
+    for(let i=0;i<firstLapsIdx;i++){
+      const txt=dlg.lines[i].fr;
+      setTimeout(()=>speakLine(txt),delay);
+      delay+=1800;
+    }
+  }
+
+  function chatSubmit() {
+    if(!sel||chatDone||!chatInput.trim()) return;
+    const speakers=[...new Set(sel.lines.map(l=>l.speaker))];
+    const lapsSpeaker=speakers.length>1?speakers[1]:speakers[0];
+
+    // chatStep points to the current LAPS line in sel.lines
+    const currentLine=sel.lines[chatStep];
+    if(!currentLine||currentLine.speaker!==lapsSpeaker) return;
+
+    const result=checkMicSimple(chatInput,currentLine.fr);
+    if(result.ok&&onXp) onXp(5,C);
+
+    // Add laps response to history
+    const newHistory=[...chatHistory,
+      {speaker:lapsSpeaker,fr:chatInput,correct:result.ok,expected:currentLine.fr,isLaps:true}
+    ];
+
+    // Find next line(s) after chatStep
+    let nextIdx=chatStep+1;
+
+    // Add all program lines until next laps line (or end)
+    const progLines=[];
+    while(nextIdx<sel.lines.length && sel.lines[nextIdx].speaker!==lapsSpeaker){
+      progLines.push({...sel.lines[nextIdx],isProgram:true,isLaps:false});
+      nextIdx++;
+    }
+
+    const finalHistory=[...newHistory,...progLines];
+    setChatHistory(finalHistory);
+    setChatInput("");
+
+    if(nextIdx>=sel.lines.length){
+      setChatDone(true);
+    } else {
+      setChatStep(nextIdx); // points to next laps line
+    }
+
+    // Speak program lines
+    if(progLines.length>0){
+      let delay=300;
+      progLines.forEach(pl=>{
+        setTimeout(()=>speakLine(pl.fr),delay);
+        delay+=1500;
+      });
+    }
+  }
+
+    function startVoiceChat(){
+    const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+    if(!SR){alert("Brauser ei toeta kõnetuvastust. Proovi Chrome'i.");return;}
+    const r=new SR();r.lang="fr-FR";
+    r.onstart=()=>setRec(true);
+    r.onend=()=>setRec(false);
+    r.onresult=e=>{
+      setChatInput(e.results[0][0].transcript);
+    };
+    r.onerror=()=>setRec(false);
+    r.start();
+  }
+
+  // ── LIST view ──
+  if(!sel)return(
+    <div style={{padding:16,maxWidth:500,margin:"0 auto"}}>
+      <div style={{textAlign:"center",marginBottom:14,padding:"14px 0",background:`linear-gradient(135deg,${C}10,${C}05)`,borderRadius:16,border:`1.5px dashed ${C}40`}}>
+        <div style={{fontSize:42,lineHeight:1.2,marginBottom:4}}>{chapter.pic||chapter.emoji}</div>
+        <div style={{fontSize:13,fontWeight:700,color:C}}>{chapter.subtitle}</div>
+      </div>
+      <SpeedBar color={C}/>
+      <p style={{color:"#6b7280",marginBottom:14,fontSize:14}}>Vali dialoog:</p>
+      <div style={{display:"flex",flexDirection:"column",gap:12}}>
+        {chapter.dialogues.map(d=>(
+          <div key={d.id} style={{background:"#fff",border:`2px solid #e5e7eb`,borderRadius:18,padding:16,boxShadow:"0 2px 8px rgba(0,0,0,.05)"}}>
+            <div style={{fontWeight:800,fontSize:15,color:C,marginBottom:8}}>💬 {d.title}</div>
+            <div style={{background:"#f9fafb",borderRadius:10,padding:10,marginBottom:12}}>
+              {d.lines.slice(0,3).map((l,i)=>(
+                <div key={i} style={{fontSize:12,color:"#374151",marginBottom:3}}>
+                  <span style={{color:"#9ca3af",marginRight:5}}>{l.speaker}:</span>
+                  <span style={{fontWeight:600}}>{l.fr}</span>
+                  <span style={{color:"#f97316",marginLeft:5,fontSize:11}}>— {l.et}</span>
+                </div>
+              ))}
+              {d.lines.length>3&&<div style={{fontSize:11,color:"#9ca3af"}}>... ja veel {d.lines.length-3} repliiki</div>}
+            </div>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+              <button className="btn btn-sm" style={{background:C,color:"#fff"}} 
+                onClick={()=>{setSel(d);setMode("read");setLi(0);setShowEt(false);setRecText("");setFb(null);}}>
+                📖 Loe & kuula
+              </button>
+              <button className="btn btn-sm" style={{background:"#ea580c",color:"#fff"}}
+                onClick={()=>{setSel(d);setMode("learn");setLi(0);setShowEt(false);setRecText("");setFb(null);}}>
+                🧠 Õpi pähe
+              </button>
+              {[...new Set(d.lines.map(l=>l.speaker))].length>1&&(
+              <button className="btn btn-sm" style={{background:"#7c3aed",color:"#fff"}}
+                onClick={()=>startChat(d)}>
+                🎭 Mängi rolli!
+              </button>
+            )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  const line = sel ? sel.lines[li] : null;
+
+  return(
+    <div style={{padding:16,maxWidth:500,margin:"0 auto"}}>
+      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14,flexWrap:"wrap"}}>
+        <button className="btn btn-sm" style={{background:"#f3f4f6",color:"#374151"}} onClick={()=>{stopAll();setSel(null);}}>← Tagasi</button>
+        <div style={{flex:1,fontWeight:700,color:C,fontSize:14}}>{sel.title}</div>
+        {mode!=="chat"&&<>
+          <button className="btn btn-sm" style={{background:mode==="read"?C:"#f3f4f6",color:mode==="read"?"#fff":"#374151"}} onClick={()=>{setMode("read");setLi(0);setShowEt(false);setFb(null);}}>📖 Loe</button>
+          <button className="btn btn-sm" style={{background:mode==="learn"?"#ea580c":"#f3f4f6",color:mode==="learn"?"#fff":"#374151"}} onClick={()=>{setMode("learn");setLi(0);setShowEt(false);setFb(null);}}>🧠 Õpi</button>
+          {[...new Set(sel.lines.map(l=>l.speaker))].length>1&&(
+            <button className="btn btn-sm" style={{background:"#7c3aed",color:"#fff"}} onClick={()=>startChat(sel)}>🎭 Mängi</button>
+          )}
+        </>}
+      </div>
+
+      {/* ── READ MODE ── */}
+      {mode==="read"&&(
+        <div>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,gap:8}}>
+            <SpeedBar color={C}/>
+            <button className="btn btn-sm" style={{background:playing?"#ef4444":C,color:"#fff"}} onClick={()=>playing?stopAll():playAll(sel.lines)}>
+              {playing?"⏹ Stopp":"▶ Kuula kõik"}
+            </button>
+          </div>
+          <div style={{background:"#fff",borderRadius:20,boxShadow:"0 4px 18px rgba(0,0,0,.07)",overflow:"hidden"}}>
+            {sel.lines.map((l,i)=>(
+              <div key={i} style={{padding:"12px 16px",borderBottom:i<sel.lines.length-1?"1px solid #f3f4f6":"none",background:hlIdx===i?`${C}12`:"transparent",transition:"background .2s"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+                  <div style={{flex:1}}>
+                    <div style={{marginBottom:4}}>
+                      <span style={{fontSize:11,fontWeight:700,color:"#fff",background:C,padding:"2px 8px",borderRadius:8,marginRight:8}}>{l.speaker}</span>
+                      <span style={{fontSize:15,fontWeight:700,color:"#1f2937"}}>{l.fr}</span>
+                    </div>
+                    <div style={{fontSize:13,color:"#ea580c"}}>🇪🇪 {l.et}</div>
+                  </div>
+                  <button className="btn btn-sm" style={{background:`${C}18`,color:C,flexShrink:0}} onClick={()=>speakLine(l.fr)}>🔊</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── LEARN MODE ── */}
+      {mode==="learn"&&line&&(
+        <div>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,flexWrap:"wrap",gap:6}}>
+            <span style={{background:`${C}18`,color:C,borderRadius:10,padding:"3px 10px",fontSize:12,fontWeight:700}}>🧠 Päheõppimine</span>
+            <SpeedBar color={C}/>
+            <span style={{fontSize:13,color:"#6b7280"}}>{li+1}/{sel.lines.length}</span>
+          </div>
+          <div style={{background:"#fff",borderRadius:20,padding:20,boxShadow:"0 4px 18px rgba(0,0,0,.07)",marginBottom:12}}>
+            <div style={{fontSize:11,color:"#9ca3af",marginBottom:6}}>{line.speaker} ütleb:</div>
+            <div style={{fontSize:20,fontWeight:800,color:"#1f2937",lineHeight:1.4,marginBottom:12}}>{line.fr}</div>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+              <button className="btn btn-sm" style={{background:C,color:"#fff"}} onClick={()=>speakLine(line.fr)}>🔊 Kuula</button>
+              <button className="btn btn-sm" style={{background:"#fff7ed",color:"#c2410c",border:"1px solid #fed7aa"}} onClick={()=>setShowEt(!showEt)}>
+                🇪🇪 {showEt?"Peida":"Näita tõlge"}
+              </button>
+            </div>
+            {showEt&&<div style={{marginTop:10,padding:10,background:"#fff7ed",borderRadius:10,fontSize:14,color:"#c2410c",fontWeight:600}}>{line.et}</div>}
+          </div>
+          <div style={{background:"#fff",borderRadius:20,padding:16,boxShadow:"0 4px 18px rgba(0,0,0,.07)",marginBottom:12}}>
+            <div style={{fontSize:13,color:"#6b7280",marginBottom:10}}>🎤 Ütle see lause järele:</div>
+            <button className="btn" style={{background:rec?"#ef4444":"#7c3aed",color:"#fff",width:"100%",justifyContent:"center",padding:"12px",fontSize:14}}
+              onClick={startVoice}>
+              {rec?"🔴 Salvestad...":"🎤 Vajuta ja räägi"}
+            </button>
+            {recText&&<div style={{marginTop:8,padding:10,background:"#f0fdf4",borderRadius:10,fontSize:13,color:"#15803d"}}>
+              ✓ Kuulsin: <strong>{recText}</strong>
+            </div>}
+            {recText&&!fb&&<button className="btn btn-sm" style={{background:C,color:"#fff",marginTop:8}} onClick={checkMic}>
+              ✓ Kontrolli
+            </button>}
+            {fb&&<div style={{marginTop:10,padding:12,borderRadius:12,fontSize:15,fontWeight:700,
+              background:fbOk?"#f0fdf4":"#fff7ed",
+              color:fbOk?"#15803d":"#c2410c",
+              borderLeft:`4px solid ${fbOk?"#22c55e":"#f97316"}`}}>
+              {fb}
+            </div>}
+          </div>
+          <div style={{display:"flex",gap:10,justifyContent:"center"}}>
+            {li>0&&<button className="btn btn-sm" style={{background:"#f3f4f6",color:"#374151"}} onClick={()=>{setLi(l=>l-1);setShowEt(false);setFb(null);setFbOk(null);setRecText("");}}>← Eelmine</button>}
+            <button className="btn btn-sm" style={{background:C,color:"#fff"}}
+              onClick={()=>{if(li<sel.lines.length-1){setLi(l=>l+1);setShowEt(false);setFb(null);setFbOk(null);setRecText("");}else setSel(null);}}>
+              {li<sel.lines.length-1?"Järgmine →":"✅ Valmis!"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── CHAT MODE ── */}
+      {mode==="chat"&&(
+        <div>
+          <div style={{background:`linear-gradient(135deg,${C}15,#f5f3ff)`,borderRadius:16,padding:12,marginBottom:14,textAlign:"center"}}>
+            <div style={{fontSize:13,fontWeight:800,color:"#7c3aed"}}>🎭 Rollimäng!</div>
+            {(()=>{
+              const speakers=[...new Set(sel.lines.map(l=>l.speaker))];
+              const lapsSpeaker=speakers.length>1?speakers[1]:speakers[0];
+              const progSpeaker=speakers[0];
+              return <div style={{fontSize:12,color:"#6b7280",marginTop:4}}>
+                Sina oled <strong style={{color:"#7c3aed"}}>{lapsSpeaker}</strong> · Programm mängib <strong style={{color:C}}>{progSpeaker}</strong>
+              </div>;
+            })()}
+          </div>
+
+          {/* Chat history */}
+          <div style={{background:"#fff",borderRadius:20,padding:12,boxShadow:"0 4px 18px rgba(0,0,0,.07)",marginBottom:14,minHeight:120}}>
+            {/* Show first program line if laps hasn't spoken yet */}
+            {chatHistory.length===0&&(()=>{
+              const speakers=[...new Set(sel.lines.map(l=>l.speaker))];
+              const progSpeaker=speakers[0];
+              const lapsSpeaker=speakers.length>1?speakers[1]:speakers[0];
+              // Show all program lines before first laps line
+              const firstLapsIdx=sel.lines.findIndex(l=>l.speaker===lapsSpeaker);
+              const initLines=sel.lines.slice(0,Math.max(firstLapsIdx,1));
+              if(initLines.length>0){
+                return(<div>{initLines.map((l,i)=>(
+                  <div key={i} style={{display:"flex",gap:8,marginBottom:8,alignItems:"flex-start"}}>
+                    <span style={{fontSize:11,fontWeight:700,color:"#fff",background:C,padding:"2px 8px",borderRadius:8,flexShrink:0}}>{l.speaker}</span>
+                    <div style={{flex:1}}>
+                      <div style={{fontSize:14,fontWeight:700,color:"#1f2937"}}>{l.fr}</div>
+                      <div style={{fontSize:12,color:"#9ca3af"}}>{l.et}</div>
+                    </div>
+                    <button className="btn btn-sm" style={{background:`${C}18`,color:C}} onClick={()=>speakLine(l.fr)}>🔊</button>
+                  </div>
+                ))}</div>);
+              }
+            })()}
+
+            {chatHistory.map((h,i)=>{
+              const isLaps = !h.isProgram;
+              return(
+                <div key={i} style={{display:"flex",gap:8,marginBottom:10,alignItems:"flex-start",flexDirection:isLaps?"row-reverse":"row"}}>
+                  <span style={{fontSize:11,fontWeight:700,color:"#fff",
+                    background:isLaps?"#7c3aed":C,
+                    padding:"2px 8px",borderRadius:8,flexShrink:0}}>{h.speaker}</span>
+                  <div style={{flex:1,textAlign:isLaps?"right":"left"}}>
+                    <div style={{fontSize:14,fontWeight:700,
+                      color:isLaps?(h.correct?"#15803d":"#c2410c"):"#1f2937",
+                      background:isLaps?(h.correct?"#f0fdf4":"#fff7ed"):"#f9fafb",
+                      borderRadius:12,padding:"8px 12px",display:"inline-block"}}>
+                      {h.fr}
+                      {isLaps&&<span style={{marginLeft:6}}>{h.correct?"✓":"✗"}</span>}
+                    </div>
+                    {isLaps&&!h.correct&&<div style={{fontSize:11,color:"#9ca3af",marginTop:2}}>Õige: {h.expected}</div>}
+                    {!isLaps&&h.et&&<div style={{fontSize:11,color:"#9ca3af",marginTop:2}}>{h.et}</div>}
+                  </div>
+                  {!isLaps&&<button className="btn btn-sm" style={{background:`${C}18`,color:C,flexShrink:0}} onClick={()=>speakLine(h.fr)}>🔊</button>}
+                </div>
+              );
+            })}
+
+            {chatDone&&<div style={{textAlign:"center",padding:16,fontSize:18,fontWeight:800,color:"#7c3aed"}}>
+              🎉 Dialoog läbi! Suurepärane töö!
+            </div>}
+          </div>
+
+          {/* Input */}
+          {!chatDone&&(()=>{
+            const speakers=[...new Set(sel.lines.map(l=>l.speaker))];
+            const lapsSpeaker=speakers.length>1?speakers[1]:speakers[0];
+            const currentLine=sel.lines[chatStep];
+            if(!currentLine||currentLine.speaker!==lapsSpeaker) return null;
+            if(!currentLine) return null;
+            return(
+              <div style={{background:"#fff",borderRadius:20,padding:14,boxShadow:"0 4px 18px rgba(0,0,0,.07)"}}>
+                <div style={{fontSize:12,color:"#9ca3af",marginBottom:8}}>
+                  🇪🇪 Sinu kord: <strong style={{color:"#7c3aed"}}>{currentLine.et}</strong>
+                </div>
+                <div style={{display:"flex",gap:8,marginBottom:8}}>
+                  <input value={chatInput} onChange={e=>setChatInput(e.target.value)}
+                    onKeyDown={e=>{if(e.key==="Enter")chatSubmit();}}
+                    placeholder="Kirjuta prantsuse keeles..."
+                    style={{flex:1,padding:"10px 14px",borderRadius:12,border:"2px solid #e5e7eb",fontSize:14,fontFamily:"inherit",outline:"none"}}/>
+                  <button className="btn btn-sm" style={{background:rec?"#ef4444":"#7c3aed",color:"#fff",flexShrink:0}} onClick={startVoiceChat}>
+                    {rec?"🔴":"🎤"}
+                  </button>
+                </div>
+                <button className="btn" style={{background:"#7c3aed",color:"#fff",width:"100%",justifyContent:"center",padding:"10px"}} onClick={chatSubmit}>
+                  Saada →
+                </button>
+              </div>
+            );
+          })()}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Kuulamine ────────────────────────────────────────────────────────────────
+function Listening({chapter}){
+  const [playingDlg,setPlayingDlg]=useState(null);
+  const [hlLine,setHlLine]=useState(null);
+  const synth=useRef(window.speechSynthesis);
+  const C=chapter.color;
+  useEffect(()=>{return()=>synth.current.cancel();},[]);
+
+  function speakWord(text){speak(text,globalSpeed);}
+
+  function speakDlg(dlg){
+    synth.current.cancel();setPlayingDlg(dlg.id);
+    let i=0;
+    function next(){
+      if(i>=dlg.lines.length){setPlayingDlg(null);setHlLine(null);return;}
+      setHlLine(i);
+      const u=new SpeechSynthesisUtterance(dlg.lines[i].fr);
+      u.lang="fr-FR";u.rate=globalSpeed;
+      const fr=window.speechSynthesis.getVoices().find(v=>v.lang.startsWith("fr"));
+      if(fr)u.voice=fr;
+      u.onend=()=>{i++;setTimeout(next,600);};
+      synth.current.speak(u);
+    }
+    next();
+  }
+  function stop(){synth.current.cancel();setPlayingDlg(null);setHlLine(null);}
+
+  return(
+    <div style={{padding:16,maxWidth:500,margin:"0 auto"}}>
+      <div style={{textAlign:"center",marginBottom:14,padding:"14px 0",background:`linear-gradient(135deg,${C}10,${C}05)`,borderRadius:16,border:`1.5px dashed ${C}40`}}>
+        <div style={{fontSize:42,lineHeight:1.2,marginBottom:4}}>{chapter.pic||chapter.emoji}</div>
+        <div style={{fontSize:13,fontWeight:700,color:C}}>{chapter.subtitle}</div>
+      </div>
+      <SpeedBar color={C}/>
+
+      <div style={{background:"#fff",borderRadius:18,padding:16,boxShadow:"0 4px 18px rgba(0,0,0,.06)",marginBottom:16}}>
+        <div style={{fontWeight:800,fontSize:15,color:C,marginBottom:12}}>🔤 Sõnavara hääldus</div>
+        {chapter.vocabulary.map((w,i)=>(
+          <div key={i} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 0",borderBottom:i<chapter.vocabulary.length-1?"1px solid #f9fafb":"none"}}>
+            <div>
+              <span style={{fontWeight:800,fontSize:15,color:"#1f2937"}}>{w.fr}</span>
+              <span style={{color:"#9ca3af",fontSize:13,marginLeft:8}}>= {w.et}</span>
+            </div>
+            <button className="btn btn-sm" style={{background:`${C}18`,color:C}} onClick={()=>speakWord(w.fr)}>🔊</button>
+          </div>
+        ))}
+      </div>
+
+      <div style={{fontWeight:800,fontSize:15,color:C,marginBottom:12}}>💬 Dialoogid</div>
+      {chapter.dialogues.map(dlg=>(
+        <div key={dlg.id} style={{background:"#fff",borderRadius:18,padding:16,boxShadow:"0 4px 18px rgba(0,0,0,.06)",marginBottom:14}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+            <div style={{fontWeight:800,color:C}}>{dlg.title}</div>
+            <button className="btn btn-sm" style={{background:playingDlg===dlg.id?"#ef4444":C,color:"#fff"}}
+              onClick={()=>playingDlg===dlg.id?stop():speakDlg(dlg)}>
+              {playingDlg===dlg.id?"⏹ Stopp":"▶ Kuula kõik"}
+            </button>
+          </div>
+          {dlg.lines.map((line,i)=>(
+            <div key={i} style={{
+              padding:"10px 12px",borderRadius:14,marginBottom:6,
+              background:hlLine===i&&playingDlg===dlg.id?`${C}15`:"#f9fafb",
+              border:`2px solid ${hlLine===i&&playingDlg===dlg.id?C:"transparent"}`,
+              transition:"all .2s"
+            }}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+                <div style={{flex:1}}>
+                  <span style={{fontSize:11,fontWeight:700,color:"#fff",background:C,padding:"1px 7px",borderRadius:8,marginRight:8}}>{line.speaker}</span>
+                  <span style={{fontSize:14,fontWeight:700,color:"#1f2937"}}>{line.fr}</span>
+                  <div style={{fontSize:12,color:"#ea580c",marginTop:4}}>🇪🇪 {line.et}</div>
+                </div>
+                <button className="btn btn-sm" style={{background:`${C}18`,color:C,flexShrink:0}} onClick={()=>speakWord(line.fr)}>🔊</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+
+// ─── Laulud & Luuletused ──────────────────────────────────────────────────────
+function Songs({chapter}){
+  const [sel,setSel]=useState(null);
+  const [lineIdx,setLineIdx]=useState(0);
+  const [showEt,setShowEt]=useState({});
+  const [learned,setLearned]=useState(new Set());
+  const synth=useRef(window.speechSynthesis);
+  const C=chapter.color;
+
+  useEffect(()=>()=>synth.current.cancel(),[]);
+
+  const songs=chapter.songs||[];
+
+  function speakLine(text){
+    synth.current.cancel();
+    setTimeout(()=>{
+      const u=new SpeechSynthesisUtterance(text);
+      u.lang="fr-FR";u.rate=globalSpeed;
+      const fr=window.speechSynthesis.getVoices().find(v=>v.lang.startsWith("fr"));
+      if(fr)u.voice=fr;
+      synth.current.speak(u);
+    },50);
+  }
+
+  function speakAll(song){
+    synth.current.cancel();
+    let i=0;
+    function next(){
+      if(i>=song.lines.length)return;
+      const u=new SpeechSynthesisUtterance(song.lines[i].fr);
+      u.lang="fr-FR";u.rate=globalSpeed;
+      const fr=window.speechSynthesis.getVoices().find(v=>v.lang.startsWith("fr"));
+      if(fr)u.voice=fr;
+      u.onend=()=>{i++;setTimeout(next,400);};
+      synth.current.speak(u);
+    }
+    next();
+  }
+
+  if(songs.length===0)return(
+    <div style={{padding:16,maxWidth:500,margin:"0 auto"}}>
+      <div style={{background:"#fff",borderRadius:20,padding:40,textAlign:"center",boxShadow:"0 4px 18px rgba(0,0,0,.07)"}}>
+        <div style={{fontSize:48,marginBottom:12}}>🎵</div>
+        <div style={{fontSize:16,fontWeight:700,color:C,marginBottom:8}}>Selles leçon'is pole laule</div>
+        <div style={{color:"#9ca3af",fontSize:13}}>Laulud on leçon'ites 42–56</div>
+      </div>
+    </div>
+  );
+
+  if(!sel)return(
+    <div style={{padding:16,maxWidth:500,margin:"0 auto"}}>
+      <div style={{textAlign:"center",marginBottom:14,padding:"14px 0",background:`linear-gradient(135deg,${C}10,${C}05)`,borderRadius:16,border:`1.5px dashed ${C}40`}}>
+        <div style={{fontSize:42,marginBottom:4}}>{chapter.pic||chapter.emoji}</div>
+        <div style={{fontSize:13,fontWeight:700,color:C}}>{chapter.subtitle}</div>
+      </div>
+      <SpeedBar color={C}/>
+      <div style={{display:"flex",flexDirection:"column",gap:12}}>
+        {songs.map((s,i)=>(
+          <div key={i} style={{background:"#fff",border:`2px solid #e5e7eb`,borderRadius:18,padding:16,boxShadow:"0 2px 8px rgba(0,0,0,.05)"}}>
+            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+              <span style={{fontSize:28}}>{s.emoji}</span>
+              <div>
+                <div style={{fontWeight:800,fontSize:15,color:C}}>{s.title}</div>
+                <span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:8,background:s.type==="laul"?"#dbeafe":"#fce7f3",color:s.type==="laul"?"#1d4ed8":"#9d174d"}}>
+                  {s.type==="laul"?"🎵 Laul":"📜 Luuletus"}
+                </span>
+              </div>
+            </div>
+            <div style={{background:"#f9fafb",borderRadius:10,padding:10,marginBottom:12}}>
+              {s.lines.slice(0,3).map((l,j)=>(
+                <div key={j} style={{fontSize:12,color:"#374151",marginBottom:2,fontStyle:"italic"}}>{l.fr}</div>
+              ))}
+              {s.lines.length>3&&<div style={{fontSize:11,color:"#9ca3af"}}>... ja veel {s.lines.length-3} rida</div>}
+            </div>
+            <div style={{display:"flex",gap:8}}>
+              <button className="btn btn-sm" style={{background:C,color:"#fff"}} onClick={()=>{setSel(s);setLineIdx(0);setShowEt({});}}>
+                📖 Õpi
+              </button>
+              <button className="btn btn-sm" style={{background:"#f3f4f6",color:"#374151"}} onClick={()=>speakAll(s)}>
+                🔊 Kuula kõik
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  return(
+    <div style={{padding:16,maxWidth:500,margin:"0 auto"}}>
+      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14}}>
+        <button className="btn btn-sm" style={{background:"#f3f4f6",color:"#374151"}} onClick={()=>{synth.current.cancel();setSel(null);}}>← Tagasi</button>
+        <div style={{flex:1}}>
+          <span style={{fontWeight:800,fontSize:14,color:C}}>{sel.emoji} {sel.title}</span>
+        </div>
+        <button className="btn btn-sm" style={{background:C,color:"#fff"}} onClick={()=>speakAll(sel)}>🔊 Kuula kõik</button>
+      </div>
+      <SpeedBar color={C}/>
+
+      {/* Kõik read korraga */}
+      <div style={{background:"#fff",borderRadius:20,padding:16,boxShadow:"0 4px 18px rgba(0,0,0,.07)",marginBottom:14}}>
+        {sel.lines.map((line,i)=>(
+          <div key={i} style={{
+            padding:"10px 12px",borderRadius:12,marginBottom:6,
+            background:i%2===0?`${C}08`:"#f9fafb",
+            border:`1px solid ${C}20`
+          }}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+              <div style={{flex:1}}>
+                <div style={{fontSize:15,fontWeight:700,color:"#1f2937",fontStyle:"italic",lineHeight:1.4}}>{line.fr}</div>
+                {showEt[i]&&<div style={{fontSize:13,color:C,marginTop:4,fontWeight:600}}>🇪🇪 {line.et}</div>}
+              </div>
+              <button className="btn btn-sm" style={{background:`${C}18`,color:C,flexShrink:0}} onClick={()=>speakLine(line.fr)}>🔊</button>
+            </div>
+            {!showEt[i]&&<button className="btn btn-sm" style={{background:"transparent",color:"#9ca3af",padding:"2px 8px",fontSize:11,marginTop:4}} onClick={()=>setShowEt(e=>({...e,[i]:true}))}>
+              🇪🇪 näita tõlge
+            </button>}
+          </div>
+        ))}
+      </div>
+
+      {/* Päheõppimine rida-realt */}
+      <div style={{background:"#fff",borderRadius:20,padding:16,boxShadow:"0 4px 18px rgba(0,0,0,.07)"}}>
+        <div style={{fontWeight:800,color:C,marginBottom:12,fontSize:14}}>🧠 Õpi pähe — rida {lineIdx+1}/{sel.lines.length}</div>
+        <div style={{height:6,background:"#e5e7eb",borderRadius:3,overflow:"hidden",marginBottom:14}}>
+          <div style={{height:"100%",width:`${((lineIdx+1)/sel.lines.length)*100}%`,background:C,borderRadius:3,transition:"width .3s"}}/>
+        </div>
+        <div style={{background:`${C}10`,borderRadius:14,padding:16,marginBottom:12,textAlign:"center"}}>
+          <div style={{fontSize:13,color:"#9ca3af",marginBottom:6}}>🇪🇪 {sel.lines[lineIdx].et}</div>
+          <div style={{fontSize:18,fontWeight:800,color:C,fontStyle:"italic"}}>{sel.lines[lineIdx].fr}</div>
+          <button className="btn btn-sm" style={{background:C,color:"#fff",marginTop:10}} onClick={()=>speakLine(sel.lines[lineIdx].fr)}>🔊 Kuula</button>
+        </div>
+        <div style={{display:"flex",gap:8,justifyContent:"center"}}>
+          {lineIdx>0&&<button className="btn btn-sm" style={{background:"#f3f4f6",color:"#374151"}} onClick={()=>setLineIdx(l=>l-1)}>← Eelmine</button>}
+          <button className="btn btn-sm" style={{background:lineIdx<sel.lines.length-1?C:"#16a34a",color:"#fff"}} onClick={()=>{
+            if(lineIdx<sel.lines.length-1)setLineIdx(l=>l+1);
+            else{setLearned(s=>new Set([...s,sel.title]));setSel(null);}
+          }}>
+            {lineIdx<sel.lines.length-1?"Järgmine →":"✅ Õpitud!"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Viktoriin ────────────────────────────────────────────────────────────────
+function Quiz({chapter, onXp}){
+  const [qs,setQs]=useState(null);
+  const [loading,setLoading]=useState(false);
+  const [ans,setAns]=useState({});
+  const [done,setDone]=useState(false);
+  const [score,setScore]=useState(0);
+  const [ansAnim,setAnsAnim]=useState({}); // track animation per question
+  const C=chapter.color;
+
+  function makeFallback(){
+    const vocab=chapter.vocabulary;
+    return vocab.slice(0,5).map(w=>{
+      const wrong=vocab.filter(x=>x.fr!==w.fr).map(x=>x.et).slice(0,3);
+      const opts=[w.et,...wrong].sort(()=>Math.random()-.5).slice(0,4);
+      return{q:`Mis tähendab prantsuse keeles "${w.fr}"?`,options:opts,answer:w.et};
+    });
+  }
+
+  function gen(){
+    setLoading(true);setAns({});setDone(false);setQs(null);
+    setTimeout(()=>{
+      const vocab=chapter.vocabulary;
+      const pool=[];
+      vocab.forEach(w=>{
+        const wrongEt=vocab.filter(x=>x.fr!==w.fr).map(x=>x.et).sort(()=>Math.random()-.5).slice(0,3);
+        if(wrongEt.length>=3) pool.push({q:`Mis tahendab "${w.fr}"?`,options:[w.et,...wrongEt].sort(()=>Math.random()-.5),answer:w.et});
+        const wrongFr=vocab.filter(x=>x.et!==w.et).map(x=>x.fr).sort(()=>Math.random()-.5).slice(0,3);
+        if(wrongFr.length>=3) pool.push({q:`Kuidas on eesti keeles "${w.fr}"?`,options:[w.et,...wrongEt].sort(()=>Math.random()-.5),answer:w.et});
+      });
+      const shuffled=pool.sort(()=>Math.random()-.5).slice(0,5);
+      setQs(shuffled.length>=3?shuffled:makeFallback());
+      setLoading(false);
+    },300);
+  }
+
+  function submit(){
+    let sc=0;qs.forEach((q,i)=>{if(ans[i]===q.answer)sc++;});
+    setScore(sc);setDone(true);
+    const xpEarned = sc*10;
+    if(onXp && xpEarned>0) onXp(xpEarned, C);
+    if(sc>=4) playSound("levelup"); else if(sc>0) playSound("correct");
+  }
+
+  function selectAnswer(qi, opt) {
+    if(done) return;
+    const q = qs[qi];
+    const correct = opt === q.answer;
+    playSound(correct ? "correct" : "wrong");
+    setAnsAnim(prev=>({...prev,[qi]:correct?"correct":"wrong"}));
+    setTimeout(()=>setAnsAnim(prev=>({...prev,[qi]:null})),400);
+    setAns(prev=>({...prev,[qi]:opt}));
+  }
+
+  if(!qs)return(
+    <div style={{padding:16,maxWidth:500,margin:"0 auto"}}>
+      <div style={{background:"#fff",borderRadius:24,padding:40,textAlign:"center",boxShadow:"0 4px 18px rgba(0,0,0,.07)"}}>
+        <div style={{fontSize:64,marginBottom:14}}>🎯</div>
+        <div style={{fontFamily:"'Baloo 2',sans-serif",fontSize:22,fontWeight:800,color:"#1f2937",marginBottom:6}}>Viktoriin!</div>
+        <div style={{fontSize:14,color:C,fontWeight:700,marginBottom:4}}>{chapter.title} — {chapter.subtitle}</div>
+        <div style={{color:"#6b7280",marginBottom:24,fontSize:14}}>5 küsimust sõnavara kohta</div>
+        <button className="btn" style={{background:C,color:"#fff",fontSize:16,padding:"14px 32px",borderRadius:14}} onClick={gen} disabled={loading}>
+          {loading?"⏳ Genereerin...":"🚀 Alusta!"}
+        </button>
+      </div>
+    </div>
+  );
+
+  return(
+    <div style={{padding:16,maxWidth:500,margin:"0 auto"}}>
+      {done&&(
+        <div style={{background:"#fff",borderRadius:24,padding:28,textAlign:"center",boxShadow:"0 4px 18px rgba(0,0,0,.07)",marginBottom:20,border:`3px solid ${score>=4?"#16a34a":"#d97706"}`}}>
+          <div style={{fontSize:54}}>{score===5?"🏆":score>=4?"🌟":score>=3?"👍":"💪"}</div>
+          <div style={{fontFamily:"'Baloo 2',sans-serif",fontSize:36,fontWeight:800,color:score>=4?"#16a34a":"#d97706"}}>{score}/{qs.length}</div>
+          <div style={{fontSize:15,color:"#374151",marginTop:6}}>
+            {score===5?"Suurepärane! Kõik õige! 🎉":score>=4?"Väga hea töö! ⭐":score>=3?"Hästi tehtud! 👏":"Harjuta veel! 💪"}
+          </div>
+          <button className="btn" style={{background:C,color:"#fff",marginTop:16,padding:"10px 24px"}} onClick={gen}>🔄 Uus viktoriin</button>
+        </div>
+      )}
+      {qs.map((q,qi)=>(
+        <div key={qi} style={{background:"#fff",borderRadius:20,padding:18,boxShadow:"0 4px 14px rgba(0,0,0,.06)",marginBottom:14}}>
+          <div style={{fontWeight:800,fontSize:15,color:"#1f2937",marginBottom:14}}>
+            <span style={{color:C,marginRight:6}}>{qi+1}.</span>{q.q}
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            {q.options.map(opt=>{
+              let bg="#f9fafb",border="#e5e7eb",tc="#374151";
+              const isSelected=ans[qi]===opt;
+              const isAnim=ansAnim[qi]===opt;
+              if(done){
+                if(opt===q.answer){bg="#dcfce7";border="#16a34a";tc="#15803d";}
+                else if(ans[qi]===opt&&ans[qi]!==q.answer){bg="#fee2e2";border="#ef4444";tc="#b91c1c";}
+              }else if(isSelected){bg=`${C}15`;border=C;tc=C;}
+              return(
+                <button key={opt} disabled={done}
+                  className={isAnim?(ansAnim[qi]==="correct"?"correct":"shake"):""}
+                  onClick={()=>selectAnswer(qi,opt)}
+                  style={{padding:"12px 16px",borderRadius:12,border:`2px solid ${border}`,background:bg,color:tc,
+                    textAlign:"left",cursor:done?"default":"pointer",fontFamily:"'Nunito',sans-serif",
+                    fontSize:14,fontWeight:600,transition:"background .2s,border .2s"}}>
+                  {done&&opt===q.answer?"✓ ":""}{done&&ans[qi]===opt&&ans[qi]!==q.answer?"✗ ":""}{opt}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+      {!done&&<button className="btn" style={{background:C,color:"#fff",width:"100%",justifyContent:"center",padding:"14px",fontSize:15,borderRadius:14}}
+        onClick={submit} disabled={Object.keys(ans).length<qs.length}>
+        ✅ Kontrolli vastuseid ({Object.keys(ans).length}/{qs.length})
+      </button>}
+    </div>
+  );
+}
+
+// ─── App ──────────────────────────────────────────────────────────────────────
+const TABS=[{id:"flash",label:"🃏 Sõnad"},{id:"dlg",label:"💬 Dialoog"},{id:"listen",label:"🔊 Kuula"},{id:"songs",label:"🎵 Laulud"},{id:"quiz",label:"🎯 Viktoriin"}];
+const GROUPS=[{label:"41–45",ids:[41,42,43,44,45]},{label:"46–50",ids:[46,47,48,49,50]},{label:"51–55",ids:[51,52,53,54,55]},{label:"56–60",ids:[56,57,58,59,60]}];
+
+function App(){
+  const [tab,setTab]=useState("flash");
+  const [chIdx,setChIdx]=useState(0);
+  const [grpIdx,setGrpIdx]=useState(0);
+  const [xp,setXp]=useState(()=>parseInt(localStorage.getItem("fr_xp")||"0"));
+  const [showConf,setShowConf]=useState(false);
+  const [xpPopup,setXpPopup]=useState(null);
+  const ch=CHAPTERS[chIdx];
+
+  function addXp(amount, color) {
+    setXp(prev=>{
+      const next=prev+amount;
+      localStorage.setItem("fr_xp",next);
+      const wasLv=getLevel(prev); const nowLv=getLevel(next);
+      if(nowLv.min>wasLv.min){playSound("levelup");setShowConf(true);setTimeout(()=>setShowConf(false),2000);}
+      return next;
+    });
+    setXpPopup({amount,color});
+    setTimeout(()=>setXpPopup(null),1000);
+  }
+
+  function selectGroup(gi){setGrpIdx(gi);setChIdx(CHAPTERS.findIndex(c=>c.id===GROUPS[gi].ids[0]));}
+
+  return(
+    <div style={{minHeight:"100vh",background:"#fff9f0"}}>
+      {/* Header */}
+      <div style={{background:"#fff",boxShadow:"0 2px 16px rgba(0,0,0,.08)",position:"sticky",top:0,zIndex:100}}>
+        <div style={{padding:"12px 16px 8px",display:"flex",alignItems:"center",gap:12,borderBottom:"1px solid #f3f4f6"}}>
+          <FrenchFlag/>
+          <div style={{flex:1}}>
+            <div style={{fontFamily:"'Baloo 2',sans-serif",fontWeight:800,fontSize:18,color:"#1f2937",lineHeight:1}}>Prantsuse keel 🇫🇷</div>
+            <div style={{fontSize:11,color:"#9ca3af",marginTop:2}}>{ch.emoji} {ch.title} — {ch.subtitle}</div>
+          </div>
+          <EiffelTower/>
+        </div>
+
+        {/* Grupid */}
+        <div style={{display:"flex",gap:6,padding:"8px 14px",overflowX:"auto",borderBottom:"1px solid #f3f4f6"}}>
+          {GROUPS.map((g,gi)=>(
+            <button key={gi} className="btn btn-sm"
+              style={{background:gi===grpIdx?ch.color:"#f3f4f6",color:gi===grpIdx?"#fff":"#6b7280",whiteSpace:"nowrap",boxShadow:gi===grpIdx?`0 4px 10px ${ch.color}40`:"none"}}
+              onClick={()=>selectGroup(gi)}>Leç {g.label}</button>
+          ))}
+        </div>
+
+        {/* Peatükid */}
+        <div style={{display:"flex",gap:6,padding:"8px 14px",overflowX:"auto",borderBottom:"1px solid #f3f4f6"}}>
+          {GROUPS[grpIdx].ids.map(id=>{
+            const ci=CHAPTERS.findIndex(c=>c.id===id);
+            const c=CHAPTERS[ci];
+            const active=ch?.id===id;
+            return(
+              <button key={id} className="btn btn-sm"
+                style={{background:active?c.color:"#f3f4f6",color:active?"#fff":"#6b7280",whiteSpace:"nowrap",boxShadow:active?`0 4px 10px ${c.color}40`:"none"}}
+                onClick={()=>setChIdx(ci)}>{c.emoji} Leç {id}</button>
+            );
+          })}
+        </div>
+
+        {/* Tabid */}
+        <div style={{display:"flex",gap:4,padding:"8px 10px",overflowX:"auto"}}>
+          {TABS.map(t=>(
+            <button key={t.id} className="tab" style={{background:tab===t.id?ch.color:"#f3f4f6",color:tab===t.id?"#fff":"#6b7280",boxShadow:tab===t.id?`0 4px 10px ${ch.color}40`:"none"}}
+              onClick={()=>setTab(t.id)}>{t.label}</button>
+          ))}
+        </div>
+        <LevelBar xp={xp} color={ch.color}/>
+      </div>
+
+      {showConf&&<Confetti/>}
+      {xpPopup&&<XpPopup xp={xpPopup.amount} color={xpPopup.color}/>}
+      <div className="fadein">
+        {tab==="flash"&&<Flashcards chapter={ch} key={`f-${chIdx}`} onXp={addXp}/>}
+        {tab==="dlg"&&<Dialogue chapter={ch} key={`d-${chIdx}`} onXp={addXp}/>}
+        {tab==="listen"&&<Listening chapter={ch} key={`l-${chIdx}`}/>}
+        {tab==="songs"&&<Songs chapter={ch} key={`s-${chIdx}`}/>}
+        {tab==="quiz"&&<Quiz chapter={ch} key={`q-${chIdx}`} onXp={addXp}/>}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
